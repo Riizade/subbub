@@ -7,22 +7,44 @@ use crate::core::data::TMP_DIRECTORY;
 
 pub fn extract_subtitles(video_file: &Path, subtitle_track: u32) -> Result<Subtitles> {
     let tmp_file = TMP_DIRECTORY.get().unwrap().join(format!(
-        "/extracted_subs_{0}_{1}",
-        video_file.to_string_lossy(),
+        "/extracted_subs_{0}_{1}.srt",
+        video_file.file_stem().unwrap().to_string_lossy(),
         subtitle_track
     ));
 
     let output = Command::new("ffmpeg")
-        .arg("-i")
+        .arg("-i") // select the input video
         .arg(video_file.as_os_str())
-        .arg("-map")
+        .arg("-map") //select the subtitle track
         .arg(format!("0:s:{subtitle_track}"))
-        .arg(tmp_file.as_os_str())
+        .arg("-c:s") // convert subtitles to srt format
+        .arg("srt")
+        .arg(tmp_file.as_os_str()) // select the output file
         .output()?;
 
     println!("{output:#?}");
 
-    let string = Subtitles::parse_from_file(tmp_file, None)?;
+    let subs = Subtitles::parse_from_file(tmp_file, None)?;
 
-    Ok(string)
+    Ok(subs)
+}
+
+pub fn read_subtitles_file(path: &Path) -> Result<Subtitles> {
+    let tmp_file = TMP_DIRECTORY.get().unwrap().join(format!(
+        "/converted_subs_{0}.srt",
+        path.file_stem().unwrap().to_string_lossy()
+    ));
+    let output = Command::new("ffmpeg")
+        .arg("-i") // select input subtitles file
+        .arg(path.as_os_str())
+        .arg("-c:s") // convert to srt format
+        .arg("srt")
+        .arg(tmp_file.as_os_str()) // output file
+        .output()?;
+
+    println!("{output:#?}");
+
+    let subs = Subtitles::parse_from_file(tmp_file, None)?;
+
+    Ok(subs)
 }

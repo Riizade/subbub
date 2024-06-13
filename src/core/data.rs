@@ -4,10 +4,12 @@ use once_cell::sync::{Lazy, OnceCell};
 use srtlib::Subtitles;
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 pub static TMP_DIRECTORY: Lazy<OnceCell<PathBuf>> = Lazy::new(|| OnceCell::from(tmp_directory()));
+pub const VIDEO_FILE_EXTENSIONS: [&str; 3] = ["mkv", "mp4", "avi"];
+pub const SUBTITLES_FILE_EXTENSIONS: [&str; 3] = ["ass", "ssa", "srt"];
 
 fn tmp_directory() -> PathBuf {
     let dir = PathBuf::from("tmp/");
@@ -18,6 +20,40 @@ fn tmp_directory() -> PathBuf {
     }
 
     dir
+}
+
+pub fn list_video_files(directory: &Path) -> Vec<PathBuf> {
+    directory
+        .read_dir()
+        .unwrap()
+        .into_iter()
+        .flat_map(|entry| {
+            let path = entry.unwrap().path();
+            if let Some(ext) = path.extension() {
+                if VIDEO_FILE_EXTENSIONS.contains(&ext.to_string_lossy().to_string().as_str()) {
+                    return Some(path);
+                }
+            }
+            None
+        })
+        .collect()
+}
+
+pub fn list_subtitles_files(directory: &Path) -> Vec<PathBuf> {
+    directory
+        .read_dir()
+        .unwrap()
+        .into_iter()
+        .flat_map(|entry| {
+            let path = entry.unwrap().path();
+            if let Some(ext) = path.extension() {
+                if SUBTITLES_FILE_EXTENSIONS.contains(&ext.to_string_lossy().to_string().as_str()) {
+                    return Some(path);
+                }
+            }
+            None
+        })
+        .collect()
 }
 
 pub enum SubtitleSource {
@@ -32,7 +68,14 @@ impl SubtitleSource {
     pub fn to_subtitles(&self) -> Result<Subtitles> {
         match self {
             SubtitleSource::File(pathbuf) => {
-                let subtitles = Subtitles::parse_from_file(pathbuf, None)?;
+                let extension = pathbuf.extension().unwrap();
+                let subtitles = if extension == "srt" {
+                    // if the subtitles are already srt format, we can read them directly
+                    Subtitles::parse_from_file(pathbuf, None)?
+                } else {
+                    // otherwise, we need to convert the file using ffmpeg first
+                    ffmpeg::read_subtitles_file(pathbuf)?
+                };
                 Ok(subtitles)
             }
             SubtitleSource::VideoTrack {
