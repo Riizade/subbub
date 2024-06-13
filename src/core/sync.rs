@@ -9,18 +9,20 @@ pub fn sync(reference: &Subtitles, unsynced: &Subtitles) -> Result<Subtitles> {
     let reference_file = TMP_DIRECTORY
         .get()
         .unwrap()
-        .join(format!("sync_reference_{reference_hash}"));
+        .join(format!("sync_reference_{reference_hash}.srt"));
+    reference.write_to_file(&reference_file, None)?;
 
     let unsynced_hash = hash_subtitles(unsynced);
     let unsynced_file = TMP_DIRECTORY
         .get()
         .unwrap()
-        .join(format!("sync_unsynced_{unsynced_hash}"));
+        .join(format!("sync_unsynced_{unsynced_hash}.srt"));
+    unsynced.write_to_file(&unsynced_file, None)?;
 
     let tmp_file = TMP_DIRECTORY
         .get()
         .unwrap()
-        .join(format!("sync_output_{reference_hash}_{unsynced_hash}"));
+        .join(format!("sync_output_{reference_hash}_{unsynced_hash}.srt"));
 
     let output = Command::new("ffsubsync")
         .arg(reference_file.as_os_str())
