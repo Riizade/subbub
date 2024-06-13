@@ -13,6 +13,8 @@ pub fn merge(primary: &Subtitles, secondary: &Subtitles) -> Result<Subtitles> {
         altered_subtitle.text = format!("{PREFIX}{0}", altered_subtitle.text);
         merged.push(altered_subtitle);
     }
+    // TODO: sort doesn't sort by time, it sorts by counter
+    // need to take all the subtitles, sort by time, and give them new counters
 
     merged.sort();
 
