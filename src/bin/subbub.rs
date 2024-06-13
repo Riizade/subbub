@@ -1,6 +1,7 @@
 // this file contains the CLI binary for subbub
 
 use clap::{Args, Parser, Subcommand};
+use subbub::core::data::TMP_DIRECTORY;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -19,4 +20,7 @@ fn main() {
     match &cli.command {
         _ => todo!(),
     }
+
+    // clean up
+    std::fs::remove_dir_all(TMP_DIRECTORY.get().unwrap());
 }
