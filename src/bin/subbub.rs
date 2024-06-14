@@ -44,6 +44,16 @@ enum Commands {
         #[arg(short = 'm', long, default_value = "ffsubsync")]
         sync_method: SyncTool,
     },
+    /// converts the given subtitle file (or directory) to srt
+    ConvertSubtitles {
+        #[arg(short = 'i', long)]
+        input: PathBuf,
+        #[arg(short = 'o', long)]
+        output: PathBuf,
+    },
+    /// command for testing
+    #[cfg(debug_assertions)]
+    Debug,
 }
 
 fn main() {
@@ -65,6 +75,9 @@ fn main() {
             *subtitles_track,
             sync_method,
         ),
+        Commands::ConvertSubtitles { input, output } => convert_subtitles(input, output),
+        #[cfg(debug_assertions)]
+        Commands::Debug => debug(),
     };
 
     // clean up
@@ -75,6 +88,26 @@ fn main() {
     }
 
     result.expect("command execution failed");
+}
+
+#[cfg(debug_assertions)]
+fn debug() -> Result<()> {
+    Ok(())
+}
+
+fn convert_subtitles(input: &Path, output: &Path) -> Result<()> {
+    if input.is_file() {
+        let subtitles = ffmpeg::read_subtitles_file(input)?;
+        subtitles.write_to_file(output, None)?;
+    } else if input.is_dir() {
+        for file in list_subtitles_files(input) {
+            let subtitles = ffmpeg::read_subtitles_file(&file)?;
+            let out_name = format!("{0}.out.srt", file.file_stem().unwrap().to_string_lossy());
+            let outfile = output.join(out_name);
+            subtitles.write_to_file(outfile, None)?;
+        }
+    }
+    Ok(())
 }
 
 fn fill_with_reference(

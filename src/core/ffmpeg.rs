@@ -22,7 +22,7 @@ pub fn extract_subtitles(video_file: &Path, subtitle_track: u32) -> Result<Subti
         .arg(tmp_file.as_os_str()) // select the output file
         .output()?;
 
-    let subs = Subtitles::parse_from_file(tmp_file, None)?;
+    let subs = read_subtitles_file(&tmp_file)?;
 
     Ok(subs)
 }
