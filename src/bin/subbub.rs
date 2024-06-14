@@ -10,7 +10,9 @@ use subbub::core::data::SubtitleSource;
 use subbub::core::data::SyncTool;
 use subbub::core::data::{list_subtitles_files, list_video_files, TMP_DIRECTORY};
 use subbub::core::ffmpeg;
+use subbub::core::ffmpeg::read_subtitles_file;
 use subbub::core::merge::merge;
+use subbub::core::modify;
 use subbub::core::sync::sync;
 
 #[derive(Parser)]
@@ -51,6 +53,13 @@ enum Commands {
         #[arg(short = 'o', long)]
         output: PathBuf,
     },
+    /// strips html from the given subtitle file or directory
+    StripHtml {
+        #[arg(short = 'i', long)]
+        input: PathBuf,
+        #[arg(short = 'o', long)]
+        output: PathBuf,
+    },
     /// command for testing
     #[cfg(debug_assertions)]
     Debug,
@@ -76,6 +85,7 @@ fn main() {
             sync_method,
         ),
         Commands::ConvertSubtitles { input, output } => convert_subtitles(input, output),
+        Commands::StripHtml { input, output } => strip_html(input, output),
         #[cfg(debug_assertions)]
         Commands::Debug => debug(),
     };
@@ -90,22 +100,49 @@ fn main() {
     result.expect("command execution failed");
 }
 
+/// takes in an input path and output path for subtitles
+/// returns a vec of (input, output) pairs
+/// allows commands to take either file paths or directory paths in agnostically
+fn parse_in_out_subtitles(input: &Path, output: &Path) -> Result<Vec<(Subtitles, PathBuf)>> {
+    if input.is_file() {
+        Ok(vec![(read_subtitles_file(input)?, output.to_owned())])
+    } else if input.is_dir() {
+        Ok(list_subtitles_files(input)
+            .iter()
+            .map(|f| {
+                let subs = read_subtitles_file(f)
+                    .expect(format!("could not read subtitles file {f:#?}").as_str());
+                let out_name = format!("{0}.out.srt", f.file_stem().unwrap().to_string_lossy());
+                let outfile = output.join(out_name);
+                (subs, outfile)
+            })
+            .collect())
+    } else {
+        Err(anyhow!(
+            "input path {input:#?} was not a file or directory, are you sure it exists?"
+        ))
+    }
+}
+
 #[cfg(debug_assertions)]
 fn debug() -> Result<()> {
     Ok(())
 }
 
 fn convert_subtitles(input: &Path, output: &Path) -> Result<()> {
-    if input.is_file() {
-        let subtitles = ffmpeg::read_subtitles_file(input)?;
-        subtitles.write_to_file(output, None)?;
-    } else if input.is_dir() {
-        for file in list_subtitles_files(input) {
-            let subtitles = ffmpeg::read_subtitles_file(&file)?;
-            let out_name = format!("{0}.out.srt", file.file_stem().unwrap().to_string_lossy());
-            let outfile = output.join(out_name);
-            subtitles.write_to_file(outfile, None)?;
-        }
+    let pairs = parse_in_out_subtitles(input, output)?;
+
+    for (subtitles, output_file) in pairs {
+        subtitles.write_to_file(output_file, None)?;
+    }
+    Ok(())
+}
+
+fn strip_html(input: &Path, output: &Path) -> Result<()> {
+    let pairs = parse_in_out_subtitles(input, output)?;
+    for (mut subtitles, output_file) in pairs {
+        modify::strip_html(&mut subtitles)?;
+        subtitles.write_to_file(output_file, None)?;
     }
     Ok(())
 }
