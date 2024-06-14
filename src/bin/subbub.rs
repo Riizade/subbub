@@ -120,7 +120,6 @@ fn fill_with_reference(
                 file_stem.to_string_lossy(),
                 suffix
             ));
-            println!("merging subtitles to create dual subs");
 
             output_subs.push((merged_subs, merged_subs_output_file));
         }
