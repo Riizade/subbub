@@ -7,7 +7,7 @@ use crate::core::data::TMP_DIRECTORY;
 
 pub fn extract_subtitles(video_file: &Path, subtitle_track: u32) -> Result<Subtitles> {
     let tmp_file = TMP_DIRECTORY.get().unwrap().join(format!(
-        "/extracted_subs_{0}_{1}.srt",
+        "extracted_subs_{0}_{1}.srt",
         video_file.file_stem().unwrap().to_string_lossy(),
         subtitle_track
     ));
