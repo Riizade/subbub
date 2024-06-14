@@ -13,10 +13,16 @@ pub fn merge(primary: &Subtitles, secondary: &Subtitles) -> Result<Subtitles> {
         altered_subtitle.text = format!("{PREFIX}{0}", altered_subtitle.text);
         merged.push(altered_subtitle);
     }
-    // TODO: sort doesn't sort by time, it sorts by counter
-    // need to take all the subtitles, sort by time, and give them new counters
 
-    merged.sort();
+    let mut merged_vec = merged.to_vec();
+    // sort the subtitles by their start time
+    merged_vec.sort_by_key(|s| s.start_time);
+    // assign their numerical order according to their start time
+    for (index, subtitle) in merged_vec.iter_mut().enumerate() {
+        subtitle.num = index;
+    }
+
+    let merged = Subtitles::new_from_vec(merged_vec);
 
     Ok(merged)
 }
