@@ -29,7 +29,7 @@ pub fn extract_subtitles(video_file: &Path, subtitle_track: u32) -> Result<Subti
 
 pub fn read_subtitles_file(path: &Path) -> Result<Subtitles> {
     let tmp_file = TMP_DIRECTORY.get().unwrap().join(format!(
-        "/converted_subs_{0}.srt",
+        "converted_subs_{0}.srt",
         path.file_stem().unwrap().to_string_lossy()
     ));
     let output = Command::new("ffmpeg")
