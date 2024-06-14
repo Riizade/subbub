@@ -1,6 +1,8 @@
 use crate::core::ffmpeg;
 use anyhow::Result;
+use clap::ValueEnum;
 use once_cell::sync::{Lazy, OnceCell};
+use serde::{Deserialize, Serialize};
 use srtlib::Subtitles;
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
@@ -62,6 +64,12 @@ pub enum SubtitleSource {
         video_file: PathBuf,
         subtitle_track: u32,
     },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncTool {
+    FFSUBSYNC,
 }
 
 impl SubtitleSource {

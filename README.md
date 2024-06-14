@@ -8,4 +8,3 @@ Must have the following installed and available in PATH
 
 - https://ffmpeg.org/
 - https://github.com/smacke/ffsubsync
-- https://mkvtoolnix.download/

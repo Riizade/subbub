@@ -7,6 +7,7 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use srtlib::Subtitles;
 use subbub::core::data::SubtitleSource;
+use subbub::core::data::SyncTool;
 use subbub::core::data::{list_subtitles_files, list_video_files, TMP_DIRECTORY};
 use subbub::core::ffmpeg;
 use subbub::core::merge::merge;
@@ -40,6 +41,8 @@ enum Commands {
         /// the index of the subtitle track to use as a reference from the video files
         #[arg(short = 't', long, default_value = "0")]
         subtitles_track: u32,
+        #[arg(short = 'm', long, default_value = "ffsubsync")]
+        sync_method: SyncTool,
     },
 }
 
@@ -53,12 +56,14 @@ fn main() {
             create_dual_subs,
             suffix,
             subtitles_track,
+            sync_method,
         } => fill_with_reference(
             subtitles_directory,
             videos_directory,
             *create_dual_subs,
             suffix,
             *subtitles_track,
+            sync_method,
         ),
     };
 
@@ -78,6 +83,7 @@ fn fill_with_reference(
     create_dual_subs: bool,
     suffix: &str,
     subtitles_track: u32,
+    sync_method: &SyncTool,
 ) -> Result<()> {
     let mut sub_files = list_subtitles_files(subtitles_directory);
     let mut video_files = list_video_files(videos_directory);
@@ -102,7 +108,7 @@ fn fill_with_reference(
         let file_stem = video_file.file_stem().unwrap();
         let video_subs = ffmpeg::extract_subtitles(video_file, subtitles_track)?;
         let unsynced_subs = SubtitleSource::File(sub_file.clone()).to_subtitles()?;
-        let synced_subs = sync(&video_subs, &unsynced_subs)?;
+        let synced_subs = sync(&video_subs, &unsynced_subs, sync_method)?;
         let synced_subs_output_file =
             PathBuf::from(format!("{0}.{1}.srt", file_stem.to_string_lossy(), suffix));
         output_subs.push((synced_subs.clone(), synced_subs_output_file));

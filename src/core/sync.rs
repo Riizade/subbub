@@ -2,9 +2,15 @@ use anyhow::Result;
 use srtlib::Subtitles;
 use std::{hash, path::Path, process::Command};
 
-use super::data::{hash_subtitles, SubtitleSource, TMP_DIRECTORY};
+use super::data::{hash_subtitles, SyncTool, TMP_DIRECTORY};
 
-pub fn sync(reference: &Subtitles, unsynced: &Subtitles) -> Result<Subtitles> {
+pub fn sync(reference: &Subtitles, unsynced: &Subtitles, method: &SyncTool) -> Result<Subtitles> {
+    match method {
+        SyncTool::FFSUBSYNC => sync_ffsubsync(reference, unsynced),
+    }
+}
+
+fn sync_ffsubsync(reference: &Subtitles, unsynced: &Subtitles) -> Result<Subtitles> {
     let reference_hash = hash_subtitles(reference);
     let reference_file = TMP_DIRECTORY
         .get()
