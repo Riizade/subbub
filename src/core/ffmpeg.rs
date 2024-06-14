@@ -22,8 +22,6 @@ pub fn extract_subtitles(video_file: &Path, subtitle_track: u32) -> Result<Subti
         .arg(tmp_file.as_os_str()) // select the output file
         .output()?;
 
-    println!("{output:#?}");
-
     let subs = Subtitles::parse_from_file(tmp_file, None)?;
 
     Ok(subs)
@@ -41,8 +39,6 @@ pub fn read_subtitles_file(path: &Path) -> Result<Subtitles> {
         .arg("srt")
         .arg(tmp_file.as_os_str()) // output file
         .output()?;
-
-    println!("{output:#?}");
 
     let subs = Subtitles::parse_from_file(tmp_file, None)?;
 

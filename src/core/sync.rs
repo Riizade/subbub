@@ -32,8 +32,6 @@ pub fn sync(reference: &Subtitles, unsynced: &Subtitles) -> Result<Subtitles> {
         .arg(tmp_file.as_os_str())
         .output()?;
 
-    println!("{output:#?}");
-
     let subtitles = Subtitles::parse_from_file(tmp_file, None)?;
 
     Ok(subtitles)

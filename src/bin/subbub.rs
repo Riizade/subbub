@@ -98,6 +98,7 @@ fn fill_with_reference(
     let mut output_subs: Vec<(Subtitles, PathBuf)> = vec![];
 
     for (sub_file, video_file) in pairs {
+        println!("syncing sub file {sub_file:#?} with video {video_file:#?}");
         let file_stem = video_file.file_stem().unwrap();
         let video_subs = ffmpeg::extract_subtitles(video_file, subtitles_track)?;
         let unsynced_subs = SubtitleSource::File(sub_file.clone()).to_subtitles()?;
@@ -113,14 +114,17 @@ fn fill_with_reference(
                 file_stem.to_string_lossy(),
                 suffix
             ));
+            println!("merging subtitles to create dual subs");
 
             output_subs.push((merged_subs, merged_subs_output_file));
         }
     }
 
+    println!("writing output files...");
     for (subtitles, output_file) in output_subs.iter() {
         subtitles.write_to_file(output_file, None)?;
     }
 
+    println!("done!");
     Ok(())
 }
