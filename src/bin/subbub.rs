@@ -1,6 +1,7 @@
 // this file contains the CLI binary for subbub
 
 use std::path::{Path, PathBuf};
+use std::process::exit;
 
 use anyhow::anyhow;
 use anyhow::Result;
@@ -97,7 +98,13 @@ fn main() {
             .expect("could not remove tmp directory");
     }
 
-    result.expect("command execution failed");
+    match result {
+        Ok(_) => println!("done!"),
+        Err(e) => {
+            println!("command execution failed:\nerror: {0}\nsource: {1:#?}\nroot cause: {2}\nbacktrace: {3}", e, e.source(), e.root_cause(), e.backtrace());
+            exit(1);
+        }
+    }
 }
 
 /// takes in an input path and output path for subtitles
@@ -173,6 +180,7 @@ fn fill_with_reference(
 
     let mut output_subs: Vec<(Subtitles, PathBuf)> = vec![];
 
+    // TODO: remove debug prints
     for (sub_file, video_file) in pairs {
         println!("syncing sub file {sub_file:#?} with video {video_file:#?}");
         let file_stem = video_file.file_stem().unwrap();
@@ -200,6 +208,5 @@ fn fill_with_reference(
         subtitles.write_to_file(output_file, None)?;
     }
 
-    println!("done!");
     Ok(())
 }
