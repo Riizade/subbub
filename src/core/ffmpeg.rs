@@ -14,7 +14,8 @@ pub fn extract_subtitles(video_file: &Path, subtitle_track: u32) -> Result<Subti
         subtitle_track
     ));
 
-    let output = Command::new("ffmpeg")
+    let mut command = Command::new("ffmpeg");
+    command
         .arg("-i") // select the input video
         .arg(video_file.as_os_str())
         .arg("-map") //select the subtitle track
@@ -22,7 +23,10 @@ pub fn extract_subtitles(video_file: &Path, subtitle_track: u32) -> Result<Subti
         .arg("-c:s") // convert subtitles to srt format
         .arg("srt")
         .arg(tmp_file.as_os_str()) // select the output file
-        .output()?;
+        ;
+    log::debug!("{0}", pretty_cmd(&command));
+    let output = command.output()?;
+    log::trace!("{output:#?}");
 
     let subs = read_subtitles_file(&tmp_file)?;
 
@@ -43,8 +47,9 @@ pub fn read_subtitles_file(path: &Path) -> Result<Subtitles> {
         .arg("srt")
         .arg(tmp_file.as_os_str()) // output file
         ;
-    // println!("{0}", pretty_cmd(&command));
+    log::debug!("{0}", pretty_cmd(&command));
     let output = command.output()?;
+    log::trace!("{output:#?}");
 
     let subs = Subtitles::parse_from_file(tmp_file, None)?;
 

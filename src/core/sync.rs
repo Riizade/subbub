@@ -2,6 +2,8 @@ use anyhow::Result;
 use srtlib::Subtitles;
 use std::{hash, path::Path, process::Command};
 
+use crate::core::data::pretty_cmd;
+
 use super::data::{hash_subtitles, SyncTool, TMP_DIRECTORY};
 
 pub fn sync(reference: &Subtitles, unsynced: &Subtitles, method: &SyncTool) -> Result<Subtitles> {
@@ -30,13 +32,16 @@ fn sync_ffsubsync(reference: &Subtitles, unsynced: &Subtitles) -> Result<Subtitl
         .unwrap()
         .join(format!("sync_out_{reference_hash}_{unsynced_hash}.srt"));
 
-    let output = Command::new("ffsubsync")
+    let mut command = Command::new("ffsubsync");
+    command
         .arg(reference_file.as_os_str())
         .arg("-i")
         .arg(unsynced_file.as_os_str())
         .arg("-o")
-        .arg(tmp_file.as_os_str())
-        .output()?;
+        .arg(tmp_file.as_os_str());
+    log::debug!("{0}", pretty_cmd(&command));
+    let output = command.output()?;
+    log::trace!("{output:#?}");
 
     let subtitles = Subtitles::parse_from_file(tmp_file, None)?;
 

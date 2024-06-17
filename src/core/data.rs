@@ -73,6 +73,15 @@ pub enum SyncTool {
     FFSUBSYNC,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum ShiftDirection {
+    #[serde(alias = "-")]
+    EARLIER,
+    #[serde(alias = "+")]
+    LATER,
+}
+
 impl SubtitleSource {
     pub fn to_subtitles(&self) -> Result<Subtitles> {
         match self {
