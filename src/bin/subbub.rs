@@ -9,9 +9,9 @@ use anyhow::{anyhow, Error};
 use clap::{Args, Parser, Subcommand};
 use log::LevelFilter;
 use srtlib::Subtitles as SrtSubtitles;
-use subbub::core::data::SubtitleSource;
 use subbub::core::data::SyncTool;
 use subbub::core::data::{list_subtitles_files, list_video_files, TMP_DIRECTORY};
+use subbub::core::data::{ShiftDirection, SubtitleSource};
 use subbub::core::ffmpeg;
 use subbub::core::ffmpeg::read_subtitles_file;
 use subbub::core::log::initialize_logging;
@@ -69,10 +69,11 @@ enum SubtitlesCommand {
     /// shifts the timing of the given subtitle(s) earlier or later by the given value in seconds
     ShiftTiming {
         /// the number of seconds to shift the subtitle(s)
-        /// positive values shift the subtitles later
-        /// negative values shift the subtitles earlier
         #[arg(short = 's', long)]
         seconds: f32,
+        /// the direction to shift the subtitles
+        #[arg(short = 'd', long)]
+        direction: ShiftDirection,
     },
     /// combines the given subtitles with another set of subtitles, creating dual subtitles (displaying both at the same time)
     /// primary subtitles will be displayed below the video
@@ -83,6 +84,14 @@ enum SubtitlesCommand {
         secondary_subtitles: PathBuf,
         #[arg(short = 'y', long, alias = "track2")]
         secondary_track: Option<u32>,
+    },
+    /// takes the subtitles from their current directory and places them alongside the videos present in the output directory
+    /// also renames them to match the videos
+    /// this makes the subtitles discoverable by various media library management applications
+    MatchVideos {
+        /// the suffix to place at the end of the subtitles file to distinguish it from other subtitle files in the same directory
+        #[arg(short = 's', long)]
+        suffix: Option<String>,
     },
 }
 
@@ -128,11 +137,16 @@ fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
     match &subcommand.command {
         SubtitlesCommand::ConvertSubtitles => convert_subtitles(&merged_io)?,
         SubtitlesCommand::StripHtml => strip_html(&merged_io)?,
-        SubtitlesCommand::ShiftTiming { seconds } => shift_seconds(&merged_io, *seconds)?,
+        SubtitlesCommand::ShiftTiming { seconds, direction } => {
+            shift_seconds(&merged_io, *seconds, *direction)?
+        }
         SubtitlesCommand::Combine {
             secondary_subtitles,
             secondary_track,
         } => combine_subs(merged_io, secondary_subtitles, *secondary_track)?,
+        SubtitlesCommand::MatchVideos { suffix } => {
+            match_videos(&subcommand.input, &subcommand.output, suffix.as_deref())?
+        }
     }
     Ok(())
 }
@@ -240,6 +254,7 @@ fn debug() -> Result<()> {
 
 fn convert_subtitles(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
     for io in merged_io {
+        std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
         io.subtitles.write_to_file(&io.output_path, None)?;
     }
     Ok(())
@@ -249,15 +264,25 @@ fn strip_html(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
     for io in merged_io {
         let mut subs = io.subtitles.clone();
         modify::strip_html(&mut subs)?;
+        std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
         subs.write_to_file(&io.output_path, None)?;
     }
     Ok(())
 }
 
-fn shift_seconds(merged_io: &Vec<SubtitlesIO>, seconds: f32) -> Result<()> {
+fn shift_seconds(
+    merged_io: &Vec<SubtitlesIO>,
+    mut seconds: f32,
+    direction: ShiftDirection,
+) -> Result<()> {
+    match direction {
+        ShiftDirection::EARLIER => seconds = -1.0 * seconds,
+        _ => (),
+    }
     for io in merged_io {
         let subtitles = &io.subtitles;
         let shifted = modify::shift_seconds(subtitles, seconds)?;
+        std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
         shifted.write_to_file(&io.output_path, None)?;
     }
     Ok(())
@@ -279,11 +304,39 @@ fn combine_subs(
 
     let zipped = zip(merged_io, secondary_input);
     for (io, (_, secondary_subtitles)) in zipped {
+        std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
         let primary_subtitles = &io.subtitles;
         let output_path = &io.output_path;
         let merged_subs = merge(&primary_subtitles, &secondary_subtitles)?;
         merged_subs.write_to_file(output_path, None)?;
     }
+    Ok(())
+}
+
+fn match_videos(input: &Path, output: &Path, suffix: Option<&str>) -> Result<()> {
+    let parent_dir = input.file_stem().unwrap().to_string_lossy();
+    let default_extension = format!(".{0}", parent_dir);
+    let suffix_str = suffix.unwrap_or_else(|| &default_extension);
+    let mut inputs = list_subtitles_files(input);
+    let mut videos = list_video_files(output);
+
+    if inputs.len() != videos.len() {
+        return Err(anyhow!("number of subtitles and number of videos are not the same:\n    videos: {0}\n    subtitles: {1}", videos.len(), inputs.len()));
+    }
+
+    inputs.sort();
+    videos.sort();
+
+    for (subtitle, video) in zip(inputs, videos) {
+        let video_name = video.file_stem().unwrap();
+        let output_filename = PathBuf::from(format!(
+            "{0}{1}.srt",
+            output.join(video_name).to_string_lossy(),
+            suffix_str
+        ));
+        std::fs::copy(subtitle, output_filename)?;
+    }
+
     Ok(())
 }
 
