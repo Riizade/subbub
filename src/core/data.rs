@@ -67,19 +67,10 @@ pub enum SubtitleSource {
     },
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, ValueEnum)]
+#[derive(Serialize, Deserialize, Debug, Clone, ValueEnum, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum SyncTool {
     FFSUBSYNC,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, ValueEnum)]
-#[serde(rename_all = "snake_case")]
-pub enum ShiftDirection {
-    #[serde(alias = "-")]
-    EARLIER,
-    #[serde(alias = "+")]
-    LATER,
 }
 
 impl SubtitleSource {

@@ -22,3 +22,16 @@ fn strip_html_string(string: &str) -> String {
     }
     strings.join("")
 }
+
+pub fn shift_seconds(subtitles: &Subtitles, seconds: f32) -> Result<Subtitles> {
+    let mut shifted_subs = subtitles.clone().to_vec();
+    let iseconds = seconds as i32;
+    let imillis = ((seconds - iseconds as f32) * 1000.0) as i32;
+
+    for subtitle in shifted_subs.iter_mut() {
+        subtitle.add_seconds(iseconds);
+        subtitle.add_milliseconds(imillis);
+    }
+
+    Ok(Subtitles::new_from_vec(shifted_subs))
+}

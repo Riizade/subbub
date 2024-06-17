@@ -1,17 +1,17 @@
 // this file contains the CLI binary for subbub
 
+use std::iter::zip;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use anyhow::Result;
 use anyhow::{anyhow, Error};
 use clap::{Args, Parser, Subcommand};
-use itertools::{Either, Itertools};
 use log::LevelFilter;
 use srtlib::Subtitles as SrtSubtitles;
+use subbub::core::data::SubtitleSource;
 use subbub::core::data::SyncTool;
 use subbub::core::data::{list_subtitles_files, list_video_files, TMP_DIRECTORY};
-use subbub::core::data::{ShiftDirection, SubtitleSource};
 use subbub::core::ffmpeg;
 use subbub::core::ffmpeg::read_subtitles_file;
 use subbub::core::log::initialize_logging;
@@ -68,12 +68,11 @@ enum SubtitlesCommand {
     StripHtml,
     /// shifts the timing of the given subtitle(s) earlier or later by the given value in seconds
     ShiftTiming {
-        /// the number of seconds to shift the subtitle(s) earlier or later
+        /// the number of seconds to shift the subtitle(s)
+        /// positive values shift the subtitles later
+        /// negative values shift the subtitles earlier
         #[arg(short = 's', long)]
         seconds: f32,
-        /// can use + for later, - for earlier
-        #[arg(short = 'd', long)]
-        direction: ShiftDirection,
     },
     /// combines the given subtitles with another set of subtitles, creating dual subtitles (displaying both at the same time)
     /// primary subtitles will be displayed below the video
@@ -82,6 +81,8 @@ enum SubtitlesCommand {
         /// the secondary subtitles to add to the given subtitles
         #[arg(short = 's', long, alias = "secondary")]
         secondary_subtitles: PathBuf,
+        #[arg(short = 'y', long, alias = "track2")]
+        secondary_track: Option<u32>,
     },
 }
 
@@ -122,15 +123,16 @@ struct SubtitlesIO {
 
 impl SubtitlesIO {}
 
-fn subtitles_command(command: &Commands, subcommand: &Subtitles) -> Result<()> {
+fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
     let merged_io = merge_io(&subcommand.input, subcommand.track, &subcommand.output)?;
     match &subcommand.command {
         SubtitlesCommand::ConvertSubtitles => convert_subtitles(&merged_io)?,
         SubtitlesCommand::StripHtml => strip_html(&merged_io)?,
-        SubtitlesCommand::ShiftTiming { seconds, direction } => todo!(),
+        SubtitlesCommand::ShiftTiming { seconds } => shift_seconds(&merged_io, *seconds)?,
         SubtitlesCommand::Combine {
             secondary_subtitles,
-        } => todo!(),
+            secondary_track,
+        } => combine_subs(merged_io, secondary_subtitles, *secondary_track)?,
     }
     Ok(())
 }
@@ -231,8 +233,6 @@ fn parse_subtitles_input(input: &Path, track: Option<u32>) -> Result<Vec<(PathBu
     }
 }
 
-fn subtitles_output() {}
-
 #[cfg(debug_assertions)]
 fn debug() -> Result<()> {
     Ok(())
@@ -240,7 +240,7 @@ fn debug() -> Result<()> {
 
 fn convert_subtitles(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
     for io in merged_io {
-        io.subtitles.write_to_file(io.output_path, None)?;
+        io.subtitles.write_to_file(&io.output_path, None)?;
     }
     Ok(())
 }
@@ -249,7 +249,40 @@ fn strip_html(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
     for io in merged_io {
         let mut subs = io.subtitles.clone();
         modify::strip_html(&mut subs)?;
-        subs.write_to_file(io.output_path, None)?;
+        subs.write_to_file(&io.output_path, None)?;
+    }
+    Ok(())
+}
+
+fn shift_seconds(merged_io: &Vec<SubtitlesIO>, seconds: f32) -> Result<()> {
+    for io in merged_io {
+        let subtitles = &io.subtitles;
+        let shifted = modify::shift_seconds(subtitles, seconds)?;
+        shifted.write_to_file(&io.output_path, None)?;
+    }
+    Ok(())
+}
+
+fn combine_subs(
+    mut merged_io: Vec<SubtitlesIO>,
+    secondary_subtitles: &Path,
+    secondary_track: Option<u32>,
+) -> Result<()> {
+    let mut secondary_input = parse_subtitles_input(secondary_subtitles, secondary_track)?;
+    if secondary_input.len() != merged_io.len() {
+        return Err(anyhow!("primary and secondary subtitle inputs have different lengths, cannot match them to combine:\n    primary: {0}\n    secondary: {1}", merged_io.len(), secondary_input.len()));
+    }
+
+    // sort to make sure we match the correct pairs
+    merged_io.sort_by_key(|io| io.input_path.clone());
+    secondary_input.sort_by_key(|i| i.0.clone());
+
+    let zipped = zip(merged_io, secondary_input);
+    for (io, (_, secondary_subtitles)) in zipped {
+        let primary_subtitles = &io.subtitles;
+        let output_path = &io.output_path;
+        let merged_subs = merge(&primary_subtitles, &secondary_subtitles)?;
+        merged_subs.write_to_file(output_path, None)?;
     }
     Ok(())
 }
