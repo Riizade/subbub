@@ -75,6 +75,18 @@ enum SubtitlesCommand {
         #[arg(short = 'd', long)]
         direction: ShiftDirection,
     },
+    /// syncs the timing of the given subtitles(s) to the secondary subtitle(s)
+    Sync {
+        /// the secondary subtitles to add to the given subtitles
+        #[arg(short = 's', long, alias = "secondary")]
+        secondary_subtitles: PathBuf,
+        /// the subtitles track, if the secondary subtitles are contained in a video
+        #[arg(short = 'y', long, alias = "track2")]
+        secondary_track: Option<u32>,
+        /// the tool to use to sync the subs
+        #[arg(short = 't', long, alias = "tool", default_value = "ffsubsync")]
+        sync_tool: SyncTool,
+    },
     /// combines the given subtitles with another set of subtitles, creating dual subtitles (displaying both at the same time)
     /// primary subtitles will be displayed below the video
     /// secondary subtitles will be displayed above the video
@@ -82,6 +94,7 @@ enum SubtitlesCommand {
         /// the secondary subtitles to add to the given subtitles
         #[arg(short = 's', long, alias = "secondary")]
         secondary_subtitles: PathBuf,
+        /// the subtitles track, if the secondary subtitles are contained in a video
         #[arg(short = 'y', long, alias = "track2")]
         secondary_track: Option<u32>,
     },
@@ -140,6 +153,11 @@ fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
         SubtitlesCommand::ShiftTiming { seconds, direction } => {
             shift_seconds(&merged_io, *seconds, *direction)?
         }
+        SubtitlesCommand::Sync {
+            secondary_subtitles,
+            secondary_track,
+            sync_tool,
+        } => sync_subs(merged_io, secondary_subtitles, *secondary_track, *sync_tool)?,
         SubtitlesCommand::Combine {
             secondary_subtitles,
             secondary_track,
@@ -337,6 +355,32 @@ fn match_videos(input: &Path, output: &Path, suffix: Option<&str>) -> Result<()>
         std::fs::copy(subtitle, output_filename)?;
     }
 
+    Ok(())
+}
+
+fn sync_subs(
+    mut merged_io: Vec<SubtitlesIO>,
+    secondary_subtitles: &Path,
+    secondary_track: Option<u32>,
+    sync_tool: SyncTool,
+) -> Result<()> {
+    let mut secondary_input = parse_subtitles_input(secondary_subtitles, secondary_track)?;
+    if secondary_input.len() != merged_io.len() {
+        return Err(anyhow!("primary and secondary subtitle inputs have different lengths, cannot match them to combine:\n    primary: {0}\n    secondary: {1}", merged_io.len(), secondary_input.len()));
+    }
+
+    // sort to make sure we match the correct pairs
+    merged_io.sort_by_key(|io| io.input_path.clone());
+    secondary_input.sort_by_key(|i| i.0.clone());
+
+    let zipped = zip(merged_io, secondary_input);
+    for (io, (_, secondary_subtitles)) in zipped {
+        std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
+        let primary_subtitles = &io.subtitles;
+        let output_path = &io.output_path;
+        let synced_subs = sync(&primary_subtitles, &secondary_subtitles, &sync_tool)?;
+        synced_subs.write_to_file(output_path, None)?;
+    }
     Ok(())
 }
 

@@ -70,6 +70,7 @@ pub enum SubtitleSource {
 #[derive(Serialize, Deserialize, Debug, Clone, ValueEnum, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum SyncTool {
+    #[serde(alias = "ffsubsync")]
     FFSUBSYNC,
 }
 
