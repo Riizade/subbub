@@ -7,6 +7,7 @@ use srtlib::Subtitles;
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
+    process::Command,
 };
 
 pub static TMP_DIRECTORY: Lazy<OnceCell<PathBuf>> = Lazy::new(|| OnceCell::from(tmp_directory()));
@@ -99,7 +100,21 @@ impl SubtitleSource {
 
 pub fn hash_subtitles(subtitles: &Subtitles) -> u64 {
     let s = subtitles.to_string();
+    hash_string(&s)
+}
+
+pub fn hash_string(s: &str) -> u64 {
     let mut h = DefaultHasher::new();
     s.hash(&mut h);
     h.finish()
+}
+
+pub fn pretty_cmd(cmd: &Command) -> String {
+    format!(
+        "{} {:?}",
+        cmd.get_envs()
+            .map(|(key, val)| format!("{:?}={:?}", key, val))
+            .fold(String::new(), |a, b| a + &b),
+        cmd
+    )
 }

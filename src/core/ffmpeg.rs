@@ -3,12 +3,14 @@ use anyhow::Result;
 use srtlib::Subtitles;
 use std::{path::Path, process::Command};
 
-use crate::core::data::TMP_DIRECTORY;
+use crate::core::data::{pretty_cmd, TMP_DIRECTORY};
+
+use super::data::hash_string;
 
 pub fn extract_subtitles(video_file: &Path, subtitle_track: u32) -> Result<Subtitles> {
     let tmp_file = TMP_DIRECTORY.get().unwrap().join(format!(
-        "extracted_subs_{0}_{1}.srt",
-        video_file.file_stem().unwrap().to_string_lossy(),
+        "ext_{0}_{1}.srt",
+        hash_string(&video_file.file_stem().unwrap().to_string_lossy()),
         subtitle_track
     ));
 
@@ -29,16 +31,20 @@ pub fn extract_subtitles(video_file: &Path, subtitle_track: u32) -> Result<Subti
 
 pub fn read_subtitles_file(path: &Path) -> Result<Subtitles> {
     let tmp_file = TMP_DIRECTORY.get().unwrap().join(format!(
-        "converted_subs_{0}.srt",
-        path.file_stem().unwrap().to_string_lossy()
+        "con_{0}.srt",
+        hash_string(&path.file_stem().unwrap().to_string_lossy())
     ));
-    let output = Command::new("ffmpeg")
+
+    let mut command = Command::new("ffmpeg");
+    command
         .arg("-i") // select input subtitles file
         .arg(path.as_os_str())
         .arg("-c:s") // convert to srt format
         .arg("srt")
         .arg(tmp_file.as_os_str()) // output file
-        .output()?;
+        ;
+    // println!("{0}", pretty_cmd(&command));
+    let output = command.output()?;
 
     let subs = Subtitles::parse_from_file(tmp_file, None)?;
 
