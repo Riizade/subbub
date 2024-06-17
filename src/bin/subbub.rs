@@ -1,5 +1,6 @@
 // this file contains the CLI binary for subbub
 
+use rayon::prelude::*;
 use std::iter::zip;
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -271,20 +272,30 @@ fn debug() -> Result<()> {
 }
 
 fn convert_subtitles(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
-    for io in merged_io {
-        std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
-        io.subtitles.write_to_file(&io.output_path, None)?;
-    }
+    let result: Result<()> = merged_io
+        .par_iter()
+        .map(|io| {
+            std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
+            io.subtitles.write_to_file(&io.output_path, None)?;
+            Ok(())
+        })
+        .collect();
+    result?;
     Ok(())
 }
 
 fn strip_html(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
-    for io in merged_io {
-        let mut subs = io.subtitles.clone();
-        modify::strip_html(&mut subs)?;
-        std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
-        subs.write_to_file(&io.output_path, None)?;
-    }
+    let result: Result<()> = merged_io
+        .par_iter()
+        .map(|io| {
+            let mut subs = io.subtitles.clone();
+            modify::strip_html(&mut subs)?;
+            std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
+            subs.write_to_file(&io.output_path, None)?;
+            Ok(())
+        })
+        .collect();
+    result?;
     Ok(())
 }
 
@@ -297,12 +308,17 @@ fn shift_seconds(
         ShiftDirection::EARLIER => seconds = -1.0 * seconds,
         _ => (),
     }
-    for io in merged_io {
-        let subtitles = &io.subtitles;
-        let shifted = modify::shift_seconds(subtitles, seconds)?;
-        std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
-        shifted.write_to_file(&io.output_path, None)?;
-    }
+    let result: Result<()> = merged_io
+        .par_iter()
+        .map(|io| {
+            let subtitles = &io.subtitles;
+            let shifted = modify::shift_seconds(subtitles, seconds)?;
+            std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
+            shifted.write_to_file(&io.output_path, None)?;
+            Ok(())
+        })
+        .collect();
+    result?;
     Ok(())
 }
 
@@ -321,13 +337,19 @@ fn combine_subs(
     secondary_input.sort_by_key(|i| i.0.clone());
 
     let zipped = zip(merged_io, secondary_input);
-    for (io, (_, secondary_subtitles)) in zipped {
-        std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
-        let primary_subtitles = &io.subtitles;
-        let output_path = &io.output_path;
-        let merged_subs = merge(&primary_subtitles, &secondary_subtitles)?;
-        merged_subs.write_to_file(output_path, None)?;
-    }
+    let result: Result<()> = zipped
+        .par_bridge()
+        .map(|(io, (_, secondary_subtitles))| {
+            std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
+            let primary_subtitles = &io.subtitles;
+            let output_path = &io.output_path;
+            let merged_subs = merge(&primary_subtitles, &secondary_subtitles)?;
+            merged_subs.write_to_file(output_path, None)?;
+            Ok(())
+        })
+        .collect();
+    result?;
+
     Ok(())
 }
 
@@ -345,15 +367,21 @@ fn match_videos(input: &Path, output: &Path, suffix: Option<&str>) -> Result<()>
     inputs.sort();
     videos.sort();
 
-    for (subtitle, video) in zip(inputs, videos) {
-        let video_name = video.file_stem().unwrap();
-        let output_filename = PathBuf::from(format!(
-            "{0}{1}.srt",
-            output.join(video_name).to_string_lossy(),
-            suffix_str
-        ));
-        std::fs::copy(subtitle, output_filename)?;
-    }
+    let result: Result<()> = zip(inputs, videos)
+        .par_bridge()
+        .map(|(subtitle, video)| {
+            let video_name = video.file_stem().unwrap();
+            let output_filename = PathBuf::from(format!(
+                "{0}{1}.srt",
+                output.join(video_name).to_string_lossy(),
+                suffix_str
+            ));
+            std::fs::copy(subtitle, output_filename)?;
+            Ok(())
+        })
+        .collect();
+
+    result?;
 
     Ok(())
 }
@@ -373,70 +401,19 @@ fn sync_subs(
     merged_io.sort_by_key(|io| io.input_path.clone());
     secondary_input.sort_by_key(|i| i.0.clone());
 
-    let zipped = zip(merged_io, secondary_input);
-    for (io, (_, reference_subtitles)) in zipped {
-        std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
-        let primary_subtitles = &io.subtitles;
-        let output_path = &io.output_path;
-        let synced_subs = sync(&reference_subtitles, &primary_subtitles, &sync_tool)?;
-        synced_subs.write_to_file(output_path, None)?;
-    }
-    Ok(())
-}
-
-fn fill_with_reference(
-    subtitles_directory: &Path,
-    videos_directory: &Path,
-    create_dual_subs: bool,
-    suffix: &str,
-    subtitles_track: u32,
-    sync_method: &SyncTool,
-) -> Result<()> {
-    let mut sub_files = list_subtitles_files(subtitles_directory);
-    let mut video_files = list_video_files(videos_directory);
-
-    if sub_files.len() != video_files.len() {
-        return Err(anyhow!(
-            "number of videos and number of subtitles differ, videos: {0}, subs: {1}",
-            video_files.len(),
-            sub_files.len()
-        ));
-    }
-
-    sub_files.sort();
-    video_files.sort();
-
-    let pairs = sub_files.iter().zip(video_files.iter());
-
-    let mut output_subs: Vec<(SrtSubtitles, PathBuf)> = vec![];
-
-    // TODO: remove debug prints
-    for (sub_file, video_file) in pairs {
-        println!("syncing sub file {sub_file:#?} with video {video_file:#?}");
-        let file_stem = video_file.file_stem().unwrap();
-        let video_subs = ffmpeg::extract_subtitles(video_file, subtitles_track)?;
-        let unsynced_subs = SubtitleSource::File(sub_file.clone()).to_subtitles()?;
-        let synced_subs = sync(&video_subs, &unsynced_subs, sync_method)?;
-        let synced_subs_output_file =
-            PathBuf::from(format!("{0}.{1}.srt", file_stem.to_string_lossy(), suffix));
-        output_subs.push((synced_subs.clone(), synced_subs_output_file));
-
-        if create_dual_subs {
-            let merged_subs = merge(&video_subs, &synced_subs)?;
-            let merged_subs_output_file = PathBuf::from(format!(
-                "{0}.dual-{1}.srt",
-                file_stem.to_string_lossy(),
-                suffix
-            ));
-
-            output_subs.push((merged_subs, merged_subs_output_file));
-        }
-    }
-
-    println!("writing output files...");
-    for (subtitles, output_file) in output_subs.iter() {
-        subtitles.write_to_file(output_file, None)?;
-    }
+    let zipped: Vec<_> = zip(merged_io, secondary_input).collect();
+    let result: Result<()> = zipped
+        .par_iter()
+        .map(|(io, (_, reference_subtitles))| {
+            std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
+            let primary_subtitles = &io.subtitles;
+            let output_path = &io.output_path;
+            let synced_subs = sync(&reference_subtitles, &primary_subtitles, &sync_tool)?;
+            synced_subs.write_to_file(output_path, None)?;
+            Ok(())
+        })
+        .collect();
+    result?;
 
     Ok(())
 }
