@@ -114,18 +114,84 @@ fn main() {
     }
 }
 
+struct SubtitlesIO {
+    input_path: PathBuf,
+    subtitles: SrtSubtitles,
+    output_path: PathBuf,
+}
+
+impl SubtitlesIO {}
+
 fn subtitles_command(command: &Commands, subcommand: &Subtitles) -> Result<()> {
-    let input_subtitles = parse_subtitles_input(&subcommand.input, subcommand.track)?;
-    let output = &subcommand.output;
+    let merged_io = merge_io(&subcommand.input, subcommand.track, &subcommand.output)?;
     match &subcommand.command {
-        SubtitlesCommand::ConvertSubtitles => convert_subtitles(&input_subtitles, output)?,
-        SubtitlesCommand::StripHtml => todo!(),
+        SubtitlesCommand::ConvertSubtitles => convert_subtitles(&merged_io)?,
+        SubtitlesCommand::StripHtml => strip_html(&merged_io)?,
         SubtitlesCommand::ShiftTiming { seconds, direction } => todo!(),
         SubtitlesCommand::Combine {
             secondary_subtitles,
         } => todo!(),
     }
     Ok(())
+}
+
+fn merge_io(input: &Path, track: Option<u32>, output: &Path) -> Result<Vec<SubtitlesIO>> {
+    let input_subs = parse_subtitles_input(input, track)?;
+    if input_subs.len() == 1 {
+        // if there is exactly one entry, the output path is used as a filename
+        let (path, subs) = input_subs.first().unwrap();
+        Ok(vec![SubtitlesIO {
+            input_path: path.to_path_buf(),
+            subtitles: subs.clone(),
+            output_path: output.to_path_buf(),
+        }])
+    } else {
+        Ok(input_subs
+            .iter()
+            .map(|(input_path, subtitles)| {
+                let output_path = output.join(input_path.file_name().unwrap());
+                SubtitlesIO {
+                    input_path: input_path.to_path_buf(),
+                    subtitles: subtitles.clone(),
+                    output_path,
+                }
+            })
+            .collect())
+    }
+}
+
+fn parse_videos(videos: &Vec<PathBuf>, track: u32) -> Result<Vec<(PathBuf, SrtSubtitles)>> {
+    let mut subs: Vec<(PathBuf, SrtSubtitles)> = vec![];
+    let mut errors: Vec<Error> = vec![];
+    videos.iter().for_each(|v| {
+        let result = ffmpeg::extract_subtitles(v, track);
+        match result {
+            Ok(s) => subs.push((v.to_path_buf(), s)),
+            Err(e) => errors.push(e),
+        }
+    });
+    if errors.is_empty() {
+        Ok(subs)
+    } else {
+        Err(anyhow!("encountered errors"))
+    }
+}
+
+fn parse_subtitles(subtitles: &Vec<PathBuf>) -> Result<Vec<(PathBuf, SrtSubtitles)>> {
+    let mut subs: Vec<(PathBuf, SrtSubtitles)> = vec![];
+    let mut errors: Vec<Error> = vec![];
+    subtitles.iter().for_each(|sub| {
+        let result = ffmpeg::read_subtitles_file(sub);
+        match result {
+            Ok(s) => subs.push((sub.to_path_buf(), s)),
+            Err(e) => errors.push(e),
+        }
+    });
+    if errors.is_empty() {
+        Ok(subs)
+    } else {
+        Err(anyhow!("encountered errors"))
+    }
 }
 
 fn parse_subtitles_input(input: &Path, track: Option<u32>) -> Result<Vec<(PathBuf, SrtSubtitles)>> {
@@ -146,20 +212,7 @@ fn parse_subtitles_input(input: &Path, track: Option<u32>) -> Result<Vec<(PathBu
                     "when using subtitles from a video file, the track must be specified"
                 ));
             }
-            let mut subs: Vec<(PathBuf, SrtSubtitles)> = vec![];
-            let mut errors: Vec<Error> = vec![];
-            videos.iter().for_each(|v| {
-                let result = ffmpeg::extract_subtitles(v, track.unwrap());
-                match result {
-                    Ok(s) => subs.push((v.to_path_buf(), s)),
-                    Err(e) => errors.push(e),
-                }
-            });
-            if errors.is_empty() {
-                Ok(subs)
-            } else {
-                Err(anyhow!("encountered errors"))
-            }
+            parse_videos(&videos, track.unwrap())
         } else if !subtitles.is_empty() {
             if track.is_some() {
                 return Err(anyhow!(
@@ -167,20 +220,7 @@ fn parse_subtitles_input(input: &Path, track: Option<u32>) -> Result<Vec<(PathBu
                     track.unwrap()
                 ));
             }
-            let mut subs: Vec<(PathBuf, SrtSubtitles)> = vec![];
-            let mut errors: Vec<Error> = vec![];
-            subtitles.iter().for_each(|sub| {
-                let result = ffmpeg::read_subtitles_file(sub);
-                match result {
-                    Ok(s) => subs.push((sub.to_path_buf(), s)),
-                    Err(e) => errors.push(e),
-                }
-            });
-            if errors.is_empty() {
-                Ok(subs)
-            } else {
-                Err(anyhow!("encountered errors"))
-            }
+            parse_subtitles(&subtitles)
         } else {
             unreachable!();
         }
@@ -191,48 +231,25 @@ fn parse_subtitles_input(input: &Path, track: Option<u32>) -> Result<Vec<(PathBu
     }
 }
 
-/// takes in an input path and output path for subtitles
-/// returns a vec of (input, output) pairs
-/// allows commands to take either file paths or directory paths in agnostically
-fn parse_in_out_subtitles(input: &Path, output: &Path) -> Result<Vec<(SrtSubtitles, PathBuf)>> {
-    if input.is_file() {
-        Ok(vec![(read_subtitles_file(input)?, output.to_owned())])
-    } else if input.is_dir() {
-        Ok(list_subtitles_files(input)
-            .iter()
-            .map(|f| {
-                let subs = read_subtitles_file(f)
-                    .expect(format!("could not read subtitles file {f:#?}").as_str());
-                let out_name = format!("{0}.out.srt", f.file_stem().unwrap().to_string_lossy());
-                let outfile = output.join(out_name);
-                (subs, outfile)
-            })
-            .collect())
-    } else {
-        Err(anyhow!(
-            "input path {input:#?} was not a file or directory, are you sure it exists?"
-        ))
-    }
-}
+fn subtitles_output() {}
 
 #[cfg(debug_assertions)]
 fn debug() -> Result<()> {
     Ok(())
 }
 
-fn convert_subtitles(inputs: &Vec<(PathBuf, SrtSubtitles)>, output: &Path) -> Result<()> {
-    for (input_file, subs) in inputs {
-        let output_file = output.join(input_file.file_name().unwrap());
-        subs.write_to_file(output_file, None)?;
+fn convert_subtitles(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
+    for io in merged_io {
+        io.subtitles.write_to_file(io.output_path, None)?;
     }
     Ok(())
 }
 
-fn strip_html(input: &Path, output: &Path) -> Result<()> {
-    let pairs = parse_in_out_subtitles(input, output)?;
-    for (mut subtitles, output_file) in pairs {
-        modify::strip_html(&mut subtitles)?;
-        subtitles.write_to_file(output_file, None)?;
+fn strip_html(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
+    for io in merged_io {
+        let mut subs = io.subtitles.clone();
+        modify::strip_html(&mut subs)?;
+        subs.write_to_file(io.output_path, None)?;
     }
     Ok(())
 }
