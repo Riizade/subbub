@@ -43,7 +43,7 @@ enum Commands {
     Debug,
 }
 
-#[derive(Args)]
+#[derive(Args, Debug)]
 #[clap(alias = "subs")]
 struct Subtitles {
     /// the subtitles used as input
@@ -61,7 +61,7 @@ struct Subtitles {
     command: SubtitlesCommand,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 enum SubtitlesCommand {
     /// converts the given subtitle file(s) to srt format
     ConvertSubtitles,
@@ -148,6 +148,7 @@ impl SubtitlesIO {}
 
 fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
     let merged_io = merge_io(&subcommand.input, subcommand.track, &subcommand.output)?;
+    log::debug!("executing command {subcommand:#?}");
     match &subcommand.command {
         SubtitlesCommand::ConvertSubtitles => convert_subtitles(&merged_io)?,
         SubtitlesCommand::StripHtml => strip_html(&merged_io)?,
@@ -208,7 +209,15 @@ fn parse_videos(videos: &Vec<PathBuf>, track: u32) -> Result<Vec<(PathBuf, SrtSu
     if errors.is_empty() {
         Ok(subs)
     } else {
-        Err(anyhow!("encountered errors"))
+        for error in errors {
+            log::error!(
+                "error:\n{0:#?}\nroot cause:\n{1}\nbacktrace:\n{2}",
+                error,
+                error.root_cause(),
+                error.backtrace()
+            );
+        }
+        Err(anyhow!("encountered errors, see logs"))
     }
 }
 
@@ -225,7 +234,15 @@ fn parse_subtitles(subtitles: &Vec<PathBuf>) -> Result<Vec<(PathBuf, SrtSubtitle
     if errors.is_empty() {
         Ok(subs)
     } else {
-        Err(anyhow!("encountered errors"))
+        for error in errors {
+            log::error!(
+                "error:\n{0:#?}\nroot cause:\n{1}\nbacktrace:\n{2}",
+                error,
+                error.root_cause(),
+                error.backtrace()
+            );
+        }
+        Err(anyhow!("encountered errors, see logs"))
     }
 }
 
@@ -275,6 +292,11 @@ fn convert_subtitles(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
     let result: Result<()> = merged_io
         .par_iter()
         .map(|io| {
+            log::debug!(
+                "converting {0:#?} to {1:#?}",
+                &io.input_path,
+                &io.output_path
+            );
             std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
             io.subtitles.write_to_file(&io.output_path, None)?;
             Ok(())
@@ -289,6 +311,11 @@ fn strip_html(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
         .par_iter()
         .map(|io| {
             let mut subs = io.subtitles.clone();
+            log::debug!(
+                "stripping html from {0:#?} and saving to {1:#?}",
+                &io.input_path,
+                &io.output_path
+            );
             modify::strip_html(&mut subs)?;
             std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
             subs.write_to_file(&io.output_path, None)?;
@@ -312,6 +339,11 @@ fn shift_seconds(
         .par_iter()
         .map(|io| {
             let subtitles = &io.subtitles;
+            log::debug!(
+                "shifting timing of {0:#?} and saving to {1:#?}",
+                &io.input_path,
+                &io.output_path
+            );
             let shifted = modify::shift_seconds(subtitles, seconds)?;
             std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
             shifted.write_to_file(&io.output_path, None)?;
@@ -339,7 +371,13 @@ fn combine_subs(
     let zipped = zip(merged_io, secondary_input);
     let result: Result<()> = zipped
         .par_bridge()
-        .map(|(io, (_, secondary_subtitles))| {
+        .map(|(io, (secondary_input, secondary_subtitles))| {
+            log::debug!(
+                "combining {0:#?} with {1:#?} and saving to {2:#?}",
+                &io.input_path,
+                &secondary_input,
+                &io.output_path
+            );
             std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
             let primary_subtitles = &io.subtitles;
             let output_path = &io.output_path;
@@ -404,7 +442,13 @@ fn sync_subs(
     let zipped: Vec<_> = zip(merged_io, secondary_input).collect();
     let result: Result<()> = zipped
         .par_iter()
-        .map(|(io, (_, reference_subtitles))| {
+        .map(|(io, (reference_input, reference_subtitles))| {
+            log::debug!(
+                "syncing {0:#?} with {1:#?} and saving to {2:#?}",
+                &io.input_path,
+                &reference_input,
+                &io.output_path
+            );
             std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
             let primary_subtitles = &io.subtitles;
             let output_path = &io.output_path;

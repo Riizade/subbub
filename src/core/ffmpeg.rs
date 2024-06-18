@@ -25,9 +25,11 @@ pub fn extract_subtitles(video_file: &Path, subtitle_track: u32) -> Result<Subti
         .arg(tmp_file.as_os_str()) // select the output file
         ;
     log::debug!("{0}", pretty_cmd(&command));
+    log::debug!("{0:#?}", &command);
     let output = command.output()?;
     log::trace!("{output:#?}");
 
+    log::debug!("reading from temporary file {tmp_file:#?} extracted from video {video_file:#?}:{subtitle_track}");
     let subs = read_subtitles_file(&tmp_file)?;
 
     Ok(subs)
@@ -48,9 +50,11 @@ pub fn read_subtitles_file(path: &Path) -> Result<Subtitles> {
         .arg(tmp_file.as_os_str()) // output file
         ;
     log::debug!("{0}", pretty_cmd(&command));
+    log::debug!("{0:#?}", &command);
     let output = command.output()?;
     log::trace!("{output:#?}");
 
+    log::debug!("reading from temporary file {tmp_file:#?} converted from {path:#?}");
     let subs = Subtitles::parse_from_file(tmp_file, None)?;
 
     Ok(subs)
