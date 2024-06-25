@@ -48,9 +48,13 @@ pub fn add_subtitles_track(
         .arg(video_file)
         .arg("-i") // input the subtitles file
         .arg(subtitles_file)
+        .arg("-map") // map both inputs to the output file
+        .arg("0")
+        .arg("-map")
+        .arg("1")
         .arg("-c") // do not re-encode the video
         .arg("copy")
-        .arg("-c:s") // set subtitle format (to SRT)
+        .arg("-c:s") // set subtitle format
         .arg("srt")
         .arg(format!("-metadata:s:s:{track_number}")) // set the track number (and also specify that they're subtitles)
         .arg(format!("language={language_code}")) // add the language code

@@ -2,10 +2,10 @@
 
 use itertools::Itertools;
 use rayon::prelude::*;
-use std::hash;
 use std::iter::zip;
 use std::path::{Path, PathBuf};
 use std::process::exit;
+use std::{fs, hash};
 
 use anyhow::{anyhow, Error};
 use anyhow::{Context, Result};
@@ -27,10 +27,10 @@ use subbub::core::sync::sync;
 #[clap(propagate_version = true)]
 struct Cli {
     /// overrides the log level
-    #[arg(short = 'l', long, default_value = "WARN")]
+    #[arg(short = 'l', long, default_value = "WARN", verbatim_doc_comment)]
     log_level: LevelFilter,
     /// when specified, keeps temporary files around
-    #[arg(short = 'k', long, default_value = "false")]
+    #[arg(short = 'k', long, default_value = "false", verbatim_doc_comment)]
     keep_tmp_files: bool,
     #[clap(subcommand)]
     command: Commands,
@@ -50,20 +50,21 @@ enum Commands {
 struct Subtitles {
     /// the subtitles used as input
     /// this may be a subtitles file, a video file, or a directory containing either subtitles files or video files
-    #[arg(short = 'i', long)]
+    #[arg(short = 'i', long, verbatim_doc_comment)]
     input: PathBuf,
     /// the subtitles track to use if the input is a video
-    #[arg(short = 't', long)]
+    #[arg(short = 't', long, verbatim_doc_comment)]
     track: Option<u32>,
     /// the location to output the modified subtitles
     /// if the input contains multiple subtitles, this will be considered a directory, otherwise, a filename
-    #[arg(short = 'o', long)]
+    #[arg(short = 'o', long, verbatim_doc_comment)]
     output: PathBuf,
     #[clap(subcommand)]
     command: SubtitlesCommand,
 }
 
 #[derive(Subcommand, Debug)]
+#[clap(verbatim_doc_comment)]
 enum SubtitlesCommand {
     /// converts the given subtitle file(s) to srt format
     ConvertSubtitles,
@@ -274,7 +275,19 @@ fn parse_subtitles(subtitles: &Vec<PathBuf>) -> Result<Vec<(PathBuf, SrtSubtitle
 
 fn parse_subtitles_input(input: &Path, track: Option<u32>) -> Result<Vec<(PathBuf, SrtSubtitles)>> {
     if input.is_file() {
-        Ok(vec![((input.to_path_buf(), read_subtitles_file(input)?))])
+        log::trace!("input {input:#?} detected as single video file");
+        if is_video_file(input) {
+            let track = track.context(
+                "when supplying a video file as input, subtitle track must be specified",
+            )?;
+            Ok(vec![(
+                input.to_path_buf(),
+                ffmpeg::extract_subtitles(input, track)?,
+            )])
+        } else {
+            log::trace!("input {input:#?} detected as single subtitles file");
+            Ok(vec![((input.to_path_buf(), read_subtitles_file(input)?))])
+        }
     } else if input.is_dir() {
         let videos = list_video_files(input);
         let subtitles = list_subtitles_files(input);
@@ -290,6 +303,7 @@ fn parse_subtitles_input(input: &Path, track: Option<u32>) -> Result<Vec<(PathBu
                     "when using subtitles from a video file, the track must be specified"
                 ));
             }
+            log::trace!("input {input:#?} detected as directory of video files");
             parse_videos(&videos, track.unwrap())
         } else if !subtitles.is_empty() {
             if track.is_some() {
@@ -298,6 +312,7 @@ fn parse_subtitles_input(input: &Path, track: Option<u32>) -> Result<Vec<(PathBu
                     track.unwrap()
                 ));
             }
+            log::trace!("input {input:#?} detected as directory of subtitles files");
             parse_subtitles(&subtitles)
         } else {
             unreachable!();
@@ -527,9 +542,11 @@ fn add_subtitles(
 
         let output_path = if subtitles.len() == 1 {
             // if there's only one input, the output should be a single file
+            fs::create_dir_all(output.parent().context("output path has no parent")?)?;
             output.to_path_buf()
         } else {
             // if there are multiple inputs, we'll use the given output as a directory, and name the output videos the same as their input counterpart
+            fs::create_dir_all(output)?;
             let filename = video_path
                 .file_name()
                 .context("video file has no file name")?;
