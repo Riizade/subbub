@@ -75,27 +75,28 @@ Match subs in the folder `subs/` with the videos in the current working director
 Sync subs in the folder `subs/` to track 1 of the subs in the current working directory, then combine them with that track, then match both sets of subs to the videos (I use this command to sync downloaded Japanese subs to existing anime series with embedded English subs)
 
 ```bash
-export TRACK=1 && \
-subbub subtitles -i ./subs -o ./converted convert-subtitles && \
-subbub subtitles -i ./converted -o ./ja sync -r ./ -y $TRACK && \
-subbub subtitles -i ./ja -o ./dual-ja combine -s ./ -y $TRACK && \
-subbub subtitles -i ./ja -o ./ match-videos && \
-subbub subtitles -i ./dual-ja -o ./ match-videos && \
+export TRACK=1; export SUBS_DIR="./subs"; export VIDEOS_DIR="./videos" && \
+subbub subtitles -i $SUBS_DIR -o ./converted convert-subtitles && \
+subbub subtitles -i ./converted -o ./ja sync -r $VIDEOS_DIR -y $TRACK && \
+subbub subtitles -i ./ja -o ./dual-ja combine -s $VIDEOS_DIR -y $TRACK && \
+subbub subtitles -i ./ja -o $VIDEOS_DIR match-videos && \
+subbub subtitles -i ./dual-ja -o $VIDEOS_DIR match-videos && \
 rm -rf ./ja && \
 rm -rf ./dual-ja && \
 rm -rf ./converted
 ```
 
-Sync a single subtitle in the same way as above
+Performs the same operations as the above command, but adds the subtitles to the video file container instead of copying them to the same directory
 
 ```bash
-export TRACK=1; export SUBTITLE_FILE="x"; export VIDEO_FILE="y" && \
-subbub subtitles -i ./"$SUBTITLE_FILE" -o ./converted.srt convert-subtitles && \
-subbub subtitles -i ./converted.srt -o ./ja.srt sync -r ./"$VIDEO_FILE" -y $TRACK && \
-subbub subtitles -i ./ja.srt -o ./dual-ja.srt combine -s ./"$VIDEO_FILE" -y $TRACK && \
-subbub subtitles -i ./ja.srt -o ./ match-videos && \
-subbub subtitles -i ./dual-ja.srt -o ./ match-videos && \
-rm -rf ./ja.srt && \
-rm -rf ./dual-ja.srt && \
-rm -rf ./converted.srt
+export EN_TRACK=1; export JA_TRACK=2; export DUAL_TRACK=3; export SUBS_DIR="./subs"; export VIDEOS_DIR="./" && \
+subbub subtitles -i $SUBS_DIR -o ./converted convert-subtitles && \
+subbub subtitles -i ./converted -o ./ja sync -r $VIDEOS_DIR -y $EN_TRACK && \
+subbub subtitles -i ./ja -o ./dual-ja combine -s $VIDEOS_DIR -y $EN_TRACK && \
+subbub subtitles -i ./ja -o ./ja-videos add-subtitles -v $VIDEOS_DIR -n $JA_TRACK -c ja && \
+subbub subtitles -i ./dual-ja -o ./dual-ja-videos add-subtitles -v ./ja-videos -n $DUAL_TRACK -c dual-ja && \
+rm -rf ./ja && \
+rm -rf ./dual-ja && \
+rm -rf ./ja-videos && \
+rm -rf ./converted
 ```
