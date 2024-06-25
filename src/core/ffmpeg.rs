@@ -1,9 +1,9 @@
 // functions that invoke ffmpeg
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use srtlib::Subtitles;
 use std::{path::Path, process::Command};
 
-use crate::core::data::{pretty_cmd, TMP_DIRECTORY};
+use crate::core::data::{pretty_cmd, pretty_output, TMP_DIRECTORY};
 
 use super::data::hash_string;
 
@@ -25,9 +25,16 @@ pub fn extract_subtitles(video_file: &Path, subtitle_track: u32) -> Result<Subti
         .arg(tmp_file.as_os_str()) // select the output file
         ;
     log::debug!("{0}", pretty_cmd(&command));
-    log::debug!("{0:#?}", &command);
     let output = command.output()?;
-    log::trace!("{output:#?}");
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "command was not successfully executed:\n{0}\n{1}",
+            pretty_cmd(&command),
+            pretty_output(&output)
+        ));
+    }
+    log::trace!("{0}", pretty_output(&output));
 
     log::debug!("reading from temporary file {tmp_file:#?} extracted from video {video_file:#?}:{subtitle_track}");
     let subs = read_subtitles_file(&tmp_file)?;
@@ -63,9 +70,17 @@ pub fn add_subtitles_track(
         .arg(output_path) // finally, the output path of the newly created video file
         ;
 
+    log::debug!("{0}", pretty_cmd(&command));
     let output = command.output()?;
 
-    log::trace!("{output:#?}");
+    if !output.status.success() {
+        return Err(anyhow!(
+            "command was not successfully executed:\n{0}\n{1}",
+            pretty_cmd(&command),
+            pretty_output(&output)
+        ));
+    }
+    log::trace!("{0}", pretty_output(&output));
 
     Ok(())
 }
@@ -85,9 +100,16 @@ pub fn read_subtitles_file(path: &Path) -> Result<Subtitles> {
         .arg(tmp_file.as_os_str()) // output file
         ;
     log::debug!("{0}", pretty_cmd(&command));
-    log::debug!("{0:#?}", &command);
     let output = command.output()?;
-    log::trace!("{output:#?}");
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "command was not successfully executed:\n{0}\n{1}",
+            pretty_cmd(&command),
+            pretty_output(&output)
+        ));
+    }
+    log::trace!("{0}", pretty_output(&output));
 
     log::debug!("reading from temporary file {tmp_file:#?} converted from {path:#?}");
     let subs = Subtitles::parse_from_file(tmp_file, None)?;

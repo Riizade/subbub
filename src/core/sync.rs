@@ -1,8 +1,8 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use srtlib::Subtitles;
 use std::{hash, path::Path, process::Command};
 
-use crate::core::data::pretty_cmd;
+use crate::core::data::{pretty_cmd, pretty_output};
 
 use super::data::{hash_subtitles, SyncTool, TMP_DIRECTORY};
 
@@ -41,8 +41,15 @@ fn sync_ffsubsync(reference: &Subtitles, unsynced: &Subtitles) -> Result<Subtitl
         .arg(tmp_file.as_os_str());
     log::debug!("{0}", pretty_cmd(&command));
     let output = command.output()?;
-    log::trace!("{output:#?}");
 
+    if !output.status.success() {
+        return Err(anyhow!(
+            "command was not successfully executed:\n{0}\n{1}",
+            pretty_cmd(&command),
+            pretty_output(&output)
+        ));
+    }
+    log::trace!("{0}", pretty_output(&output));
     let subtitles = Subtitles::parse_from_file(tmp_file, None)?;
 
     Ok(subtitles)

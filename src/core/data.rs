@@ -5,9 +5,10 @@ use once_cell::sync::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
 use srtlib::Subtitles;
 use std::{
+    fmt::Display,
     hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Output},
 };
 
 pub static TMP_DIRECTORY: Lazy<OnceCell<PathBuf>> = Lazy::new(|| OnceCell::from(tmp_directory()));
@@ -145,4 +146,15 @@ pub fn pretty_cmd(cmd: &Command) -> String {
             .fold(String::new(), |a, b| a + &b),
         cmd
     )
+}
+
+pub fn pretty_output(output: &Output) -> String {
+    let separator = "--------------------";
+    let s = format!(
+        "status: {0}\n{separator}\nstderr:\n{1}\n{separator}\nstdout:\n{2}\n",
+        output.status,
+        String::from_utf8(output.stderr.clone()).unwrap(),
+        String::from_utf8(output.stdout.clone()).unwrap()
+    );
+    s
 }
