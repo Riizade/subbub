@@ -56,6 +56,8 @@ pub fn add_subtitles_track(
         .arg("copy")
         .arg("-c:s") // set subtitle format
         .arg("srt")
+        .arg("-max_interleave_delta") // workaround for a known issue with mkv + subtitles with large gaps, see https://old.reddit.com/r/ffmpeg/comments/1do9azh/difficulty_adding_subtitles_track_to_video/la8bnh8/
+        .arg("0")
         .arg(format!("-metadata:s:s:{track_number}")) // set the track number (and also specify that they're subtitles)
         .arg(format!("language={language_code}")) // add the language code
         .arg(output_path) // finally, the output path of the newly created video file
