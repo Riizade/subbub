@@ -25,19 +25,38 @@ fn tmp_directory() -> PathBuf {
     dir
 }
 
+pub fn is_subtitle_file(path: &Path) -> bool {
+    if let Some(ext) = path.extension() {
+        if SUBTITLES_FILE_EXTENSIONS.contains(&ext.to_string_lossy().to_string().as_str()) {
+            return true;
+        }
+    }
+
+    false
+}
+
+pub fn is_video_file(path: &Path) -> bool {
+    if let Some(ext) = path.extension() {
+        if VIDEO_FILE_EXTENSIONS.contains(&ext.to_string_lossy().to_string().as_str()) {
+            return true;
+        }
+    }
+
+    false
+}
+
 pub fn list_video_files(directory: &Path) -> Vec<PathBuf> {
     directory
         .read_dir()
         .unwrap()
         .into_iter()
-        .flat_map(|entry| {
+        .filter_map(|entry| {
             let path = entry.unwrap().path();
-            if let Some(ext) = path.extension() {
-                if VIDEO_FILE_EXTENSIONS.contains(&ext.to_string_lossy().to_string().as_str()) {
-                    return Some(path);
-                }
+            if is_video_file(&path) {
+                Some(path)
+            } else {
+                None
             }
-            None
         })
         .collect()
 }
@@ -47,14 +66,13 @@ pub fn list_subtitles_files(directory: &Path) -> Vec<PathBuf> {
         .read_dir()
         .unwrap()
         .into_iter()
-        .flat_map(|entry| {
+        .filter_map(|entry| {
             let path = entry.unwrap().path();
-            if let Some(ext) = path.extension() {
-                if SUBTITLES_FILE_EXTENSIONS.contains(&ext.to_string_lossy().to_string().as_str()) {
-                    return Some(path);
-                }
+            if is_subtitle_file(&path) {
+                Some(path)
+            } else {
+                None
             }
-            None
         })
         .collect()
 }

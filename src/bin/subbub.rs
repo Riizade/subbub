@@ -2,16 +2,17 @@
 
 use itertools::Itertools;
 use rayon::prelude::*;
+use std::hash;
 use std::iter::zip;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
-use anyhow::Result;
 use anyhow::{anyhow, Error};
+use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use log::LevelFilter;
 use srtlib::Subtitles as SrtSubtitles;
-use subbub::core::data::SyncTool;
+use subbub::core::data::{hash_subtitles, is_video_file, SyncTool};
 use subbub::core::data::{list_subtitles_files, list_video_files, TMP_DIRECTORY};
 use subbub::core::data::{ShiftDirection, SubtitleSource};
 use subbub::core::ffmpeg;
@@ -184,7 +185,14 @@ fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
             video_path,
             new_track,
             language_code,
-        } => add_subtitles(merged_io, video_path, *new_track, language_code)?,
+        } => add_subtitles(
+            &subcommand.input,
+            subcommand.track,
+            &subcommand.output,
+            video_path,
+            *new_track,
+            language_code,
+        )?,
     }
     Ok(())
 }
@@ -482,38 +490,54 @@ fn sync_subs(
 
 fn add_subtitles(
     input: &Path,
-    output: &Path,
     input_track: Option<u32>,
+    output: &Path,
     videos_path: &Path,
     new_track: u32,
     language_code: &str,
 ) -> Result<()> {
+    let mut subtitles = parse_subtitles_input(input, input_track)?;
+
     let mut videos = if videos_path.is_dir() {
         list_video_files(videos_path)
     } else {
         vec![videos_path.to_path_buf()]
     };
 
-    if videos.len() != merged_io.len() {
-        return Err(anyhow!("subtitles and video inputs have different lengths, cannot match them to combine:\n    subtitle: {0}\n    video: {1}", merged_io.len(), videos.len()));
+    if videos.len() != subtitles.len() {
+        return Err(anyhow!("subtitles and video inputs have different lengths, cannot match them to combine:\n    subtitle: {0}\n    video: {1}", subtitles.len(), videos.len()));
     }
 
     videos.sort();
-    merged_io.sort_by_key(|io| io.input_path.clone());
+    subtitles.sort_by_key(|(path, _)| path.clone());
 
-    let units = zip(merged_io, videos).collect_vec();
-    for (
-        SubtitlesIO {
-            input_path,
-            subtitles: _,
-            output_path,
-        },
-        video_path,
-    ) in units
-    {
+    let units = zip(subtitles, videos).collect_vec();
+    for ((input_path, subtitles), video_path) in units {
+        // get subtitles path on disk
+        let subtitles_path = if is_video_file(&input_path) {
+            let tmp_filename = format!("add_{0}.srt", hash_subtitles(&subtitles));
+            let tmp_filepath = TMP_DIRECTORY.get().unwrap().join(tmp_filename);
+            // if input path is a video file, we'll need to save the extracted subs and point to the extracted path
+            subtitles.write_to_file(&tmp_filepath, None)?;
+            tmp_filepath
+        } else {
+            // if input path is not a video file, we can assume it's a subtitles file and point to the path
+            input_path
+        };
+
+        let output_path = if subtitles.len() == 1 {
+            // if there's only one input, the output should be a single file
+            output.to_path_buf()
+        } else {
+            // if there are multiple inputs, we'll use the given output as a directory, and name the output videos the same as their input counterpart
+            let filename = video_path
+                .file_name()
+                .context("video file has no file name")?;
+            output.join(filename)
+        };
         ffmpeg::add_subtitles_track(
             &video_path,
-            &input_path,
+            &subtitles_path,
             new_track,
             language_code,
             &output_path,
