@@ -110,7 +110,6 @@ enum SubtitlesCommand {
         #[arg(short = 's', long)]
         suffix: Option<String>,
     },
-    #[cfg(debug_assertions)]
     /// adds given subtitle(s) (-i/--input) to the given video(s) (-v/--video_path)
     AddSubtitles {
         /// the path to the video file(s) that will have subtitles added
@@ -183,7 +182,6 @@ fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
         SubtitlesCommand::MatchVideos { suffix } => {
             match_videos(&subcommand.input, &subcommand.output, suffix.as_deref())?
         }
-        #[cfg(debug_assertions)]
         SubtitlesCommand::AddSubtitles {
             video_path,
             new_track,
