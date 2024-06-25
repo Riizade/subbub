@@ -35,6 +35,35 @@ pub fn extract_subtitles(video_file: &Path, subtitle_track: u32) -> Result<Subti
     Ok(subs)
 }
 
+pub fn add_subtitles_track(
+    video_file: &Path,
+    subtitles_file: &Path,
+    track_number: u32,
+    language_code: &str,
+    output_path: &Path,
+) -> Result<()> {
+    let mut command = Command::new("ffmpeg");
+    command
+        .arg("-i") // input the video file
+        .arg(video_file)
+        .arg("-i") // input the subtitles file
+        .arg(subtitles_file)
+        .arg("-c") // do not re-encode the video
+        .arg("copy")
+        .arg("-c:s") // set subtitle format (to SRT)
+        .arg("srt")
+        .arg(format!("-metadata:s:s:{track_number}")) // set the track number (and also specify that they're subtitles)
+        .arg(format!("language={language_code}")) // add the language code
+        .arg(output_path) // finally, the output path of the newly created video file
+        ;
+
+    let output = command.output()?;
+
+    log::trace!("{output:#?}");
+
+    Ok(())
+}
+
 pub fn read_subtitles_file(path: &Path) -> Result<Subtitles> {
     let tmp_file = TMP_DIRECTORY.get().unwrap().join(format!(
         "con_{0}.srt",

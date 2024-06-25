@@ -1,5 +1,6 @@
 // this file contains the CLI binary for subbub
 
+use itertools::Itertools;
 use rayon::prelude::*;
 use std::iter::zip;
 use std::path::{Path, PathBuf};
@@ -107,6 +108,18 @@ enum SubtitlesCommand {
         #[arg(short = 's', long)]
         suffix: Option<String>,
     },
+    /// adds given subtitle(s) (-i/--input) to the given video(s) (-v/--video_path)
+    AddSubtitles {
+        /// the path to the video file(s) that will have subtitles added
+        #[arg(short = 'v', long)]
+        video_path: PathBuf,
+        /// the track number that will be assigned to the newly added subtitle track
+        #[arg(short = 'n', long)]
+        new_track: u32,
+        /// the language code that will be assigned to the newly added subtitle track
+        #[arg(short = 'c', long)]
+        language_code: String,
+    },
 }
 
 fn main() {
@@ -167,6 +180,11 @@ fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
         SubtitlesCommand::MatchVideos { suffix } => {
             match_videos(&subcommand.input, &subcommand.output, suffix.as_deref())?
         }
+        SubtitlesCommand::AddSubtitles {
+            video_path,
+            new_track,
+            language_code,
+        } => add_subtitles(merged_io, video_path, *new_track, language_code)?,
     }
     Ok(())
 }
@@ -458,6 +476,49 @@ fn sync_subs(
         })
         .collect();
     result?;
+
+    Ok(())
+}
+
+fn add_subtitles(
+    input: &Path,
+    output: &Path,
+    input_track: Option<u32>,
+    videos_path: &Path,
+    new_track: u32,
+    language_code: &str,
+) -> Result<()> {
+    let mut videos = if videos_path.is_dir() {
+        list_video_files(videos_path)
+    } else {
+        vec![videos_path.to_path_buf()]
+    };
+
+    if videos.len() != merged_io.len() {
+        return Err(anyhow!("subtitles and video inputs have different lengths, cannot match them to combine:\n    subtitle: {0}\n    video: {1}", merged_io.len(), videos.len()));
+    }
+
+    videos.sort();
+    merged_io.sort_by_key(|io| io.input_path.clone());
+
+    let units = zip(merged_io, videos).collect_vec();
+    for (
+        SubtitlesIO {
+            input_path,
+            subtitles: _,
+            output_path,
+        },
+        video_path,
+    ) in units
+    {
+        ffmpeg::add_subtitles_track(
+            &video_path,
+            &input_path,
+            new_track,
+            language_code,
+            &output_path,
+        )?;
+    }
 
     Ok(())
 }
