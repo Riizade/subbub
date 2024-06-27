@@ -116,3 +116,7 @@ pub fn read_subtitles_file(path: &Path) -> Result<Subtitles> {
 
     Ok(subs)
 }
+
+pub fn convert_to_mkv(video_file: &Path, output_file: &Path) -> Result<()> {
+    unimplemented!();
+}

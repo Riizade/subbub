@@ -15,12 +15,12 @@ use srtlib::Subtitles as SrtSubtitles;
 use subbub::core::data::{hash_subtitles, is_video_file, SyncTool};
 use subbub::core::data::{list_subtitles_files, list_video_files, TMP_DIRECTORY};
 use subbub::core::data::{ShiftDirection, SubtitleSource};
-use subbub::core::ffmpeg;
 use subbub::core::ffmpeg::read_subtitles_file;
 use subbub::core::log::initialize_logging;
 use subbub::core::merge::merge;
 use subbub::core::modify;
 use subbub::core::sync::sync;
+use subbub::core::{ffmpeg, mkvmerge};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -40,6 +40,7 @@ struct Cli {
 enum Commands {
     /// commands to modify subtitles
     Subtitles(Subtitles),
+    Operations(Operations),
     /// command for testing
     #[cfg(debug_assertions)]
     Debug,
@@ -124,13 +125,26 @@ enum SubtitlesCommand {
     },
 }
 
+#[derive(Args, Debug)]
+#[clap(alias = "ops")]
+struct Operations {
+    #[clap(subcommand)]
+    command: OperationsCommand,
+}
+
+#[derive(Subcommand, Debug)]
+#[clap(verbatim_doc_comment)]
+/// subcommands for common sequences of operations
+enum OperationsCommand {}
+
 fn main() {
     let cli = Cli::parse();
 
     initialize_logging(cli.log_level);
 
     let result = match &cli.command {
-        Commands::Subtitles(subcommand) => subtitles_command(&cli.command, subcommand),
+        Commands::Subtitles(subtitles) => subtitles_command(&cli.command, subtitles),
+        Commands::Operations(operations) => operations_command(&cli.command, operations),
         #[cfg(debug_assertions)]
         Commands::Debug => debug(),
     };
@@ -552,7 +566,7 @@ fn add_subtitles(
                 .context("video file has no file name")?;
             output.join(filename)
         };
-        ffmpeg::add_subtitles_track(
+        mkvmerge::add_subtitles_track(
             &video_path,
             &subtitles_path,
             new_track,
@@ -562,4 +576,18 @@ fn add_subtitles(
     }
 
     Ok(())
+}
+
+fn operations_command(_: &Commands, operations: &Operations) -> Result<()> {
+    unimplemented!();
+}
+
+fn anime_command() -> Result<()> {
+    // convert video to mkv
+    // check number of sub tracks
+    // extract provided track number
+    // convert provided subs to srt
+    // combine provided subs with extracted track
+    // add sub tracks to mkv file
+    unimplemented!();
 }
