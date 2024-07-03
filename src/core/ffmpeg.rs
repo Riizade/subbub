@@ -2,7 +2,11 @@
 use anyhow::{anyhow, Context, Result};
 use itertools::Itertools;
 use srtlib::Subtitles;
-use std::{path::Path, process::Command};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+    str::FromStr,
+};
 
 use crate::core::data::{pretty_cmd, pretty_output, TMP_DIRECTORY};
 
@@ -132,6 +136,13 @@ pub fn number_of_subtitle_streams(video_file: &Path) -> Result<u32> {
         .arg(video_file.as_os_str());
     log::debug!("{0}", pretty_cmd(&command));
     let output = command.output()?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "command was not successfully executed:\n{0}\n{1}",
+            pretty_cmd(&command),
+            pretty_output(&output)
+        ));
+    }
     log::trace!("{0}", pretty_output(&output));
     let stdout =
         String::from_utf8(output.stdout.clone()).context("could not parse stdout to utf8")?;
@@ -139,6 +150,28 @@ pub fn number_of_subtitle_streams(video_file: &Path) -> Result<u32> {
     Ok(len as u32)
 }
 
-pub fn convert_to_mkv(video_file: &Path, output_file: &Path) -> Result<()> {
-    unimplemented!();
+pub fn convert_to_mkv(video_file: &Path) -> Result<PathBuf> {
+    let mut command = Command::new("ffmpeg");
+    let output_file = TMP_DIRECTORY.get().unwrap().join(PathBuf::from_str(
+        format!("{0}.mkv", video_file.file_stem().unwrap().to_string_lossy()).as_str(),
+    )?);
+    command
+        .arg("-i") // select input subtitles file
+        .arg(video_file.as_os_str())
+        .arg("-c") // convert to srt format
+        .arg("copy")
+        .arg(&output_file) // output file
+        ;
+    log::debug!("{0}", pretty_cmd(&command));
+    let output = command.output()?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "command was not successfully executed:\n{0}\n{1}",
+            pretty_cmd(&command),
+            pretty_output(&output)
+        ));
+    }
+    log::trace!("{0}", pretty_output(&output));
+
+    Ok(output_file)
 }

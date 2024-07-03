@@ -27,7 +27,7 @@ use subbub::core::{ffmpeg, mkvmerge};
 #[clap(propagate_version = true)]
 struct Cli {
     /// overrides the log level
-    #[arg(short = 'l', long, default_value = "WARN", verbatim_doc_comment)]
+    #[arg(short = 'l', long, default_value = "INFO", verbatim_doc_comment)]
     log_level: LevelFilter,
     /// when specified, keeps temporary files around
     #[arg(short = 'k', long, default_value = "false", verbatim_doc_comment)]
@@ -87,13 +87,13 @@ enum SubtitlesCommand {
     #[clap(verbatim_doc_comment)]
     Sync {
         /// the secondary subtitles to add to the given subtitles
-        #[arg(short = 'r', long, alias = "reference")]
+        #[arg(short = 'r', long, visible_alias = "reference")]
         reference_subtitles: PathBuf,
         /// the subtitles track, if the secondary subtitles are contained in a video
-        #[arg(short = 'y', long, alias = "track2")]
+        #[arg(short = 'y', long, visible_alias = "track2")]
         reference_track: Option<u32>,
         /// the tool to use to sync the subs
-        #[arg(short = 't', long, alias = "tool", default_value = "ffsubsync")]
+        #[arg(short = 't', long, visible_alias = "tool", default_value = "ffsubsync")]
         sync_tool: SyncTool,
     },
     /// combines the given subtitles with another set of subtitles, creating dual subtitles (displaying both at the same time)
@@ -102,10 +102,10 @@ enum SubtitlesCommand {
     #[clap(verbatim_doc_comment)]
     Combine {
         /// the secondary subtitles to add to the given subtitles
-        #[arg(short = 's', long, alias = "secondary")]
+        #[arg(short = 's', long, visible_alias = "secondary")]
         secondary_subtitles: PathBuf,
         /// the subtitles track, if the secondary subtitles are contained in a video
-        #[arg(short = 'y', long, alias = "track2")]
+        #[arg(short = 'y', long, visible_alias = "track2")]
         secondary_track: Option<u32>,
     },
     /// takes the subtitles from their current directory and places them alongside the videos present in the output directory
@@ -133,7 +133,7 @@ enum SubtitlesCommand {
 }
 
 #[derive(Args, Debug)]
-#[clap(alias = "ops")]
+#[clap(visible_aliases = ["ops", "compound"])]
 struct CompoundOperations {
     #[clap(subcommand)]
     command: CompoundOperationsCommand,
@@ -149,20 +149,25 @@ enum CompoundOperationsCommand {
     #[clap(verbatim_doc_comment)]
     AddDualSubs {
         /// the directory containing the video files
+        #[clap(verbatim_doc_comment)]
         #[arg(short = 'v', long)]
         videos_path: PathBuf,
         /// the subtitles track in the video to use as a timing reference
-        #[arg(short = 't', long, alias = "track")]
+        #[clap(verbatim_doc_comment)]
+        #[arg(short = 't', long, visible_alias = "track")]
         subtitles_track: u32,
         /// the directory containing the subtitles files
+        #[clap(verbatim_doc_comment)]
         #[arg(short = 's', long)]
         subtitles_path: PathBuf,
         /// the directory to output the newly created videos to
         /// WARNING: if you use the same directory as videos_path, the videos may be overwritten
+        #[clap(verbatim_doc_comment)]
         #[arg(short = 'o', long)]
         output_path: PathBuf,
         /// the language code of the newly added subtitles file
-        #[arg(short = 'c', long, alias = "lang")]
+        #[clap(verbatim_doc_comment)]
+        #[arg(short = 'c', long, visible_alias = "lang")]
         language_code: String,
     },
 }
@@ -680,13 +685,9 @@ fn dual_subs_command_single(
     let (index, (video_file, subtitles_file)) = tuple;
     log::info!("started processing video #{index}");
     let video_filename = video_file.file_stem().unwrap().to_string_lossy();
-    let mkv_filepath = TMP_DIRECTORY
-        .get()
-        .unwrap()
-        .join(format!("{0}.mkv", video_filename));
 
     // convert video to mkv
-    ffmpeg::convert_to_mkv(video_file, &mkv_filepath)?;
+    let mkv_filepath = ffmpeg::convert_to_mkv(video_file)?;
 
     // check number of sub tracks
     let sub_tracks = ffmpeg::number_of_subtitle_streams(video_file)?;
@@ -727,6 +728,7 @@ fn dual_subs_command_single(
     )?;
     // add dual sub track
     let final_video = output.join(format!("{0}.mkv", video_filename));
+    std::fs::create_dir_all(output)?;
     mkvmerge::add_subtitles_track(
         &intermediate_video,
         &dual_sub_filepath,
