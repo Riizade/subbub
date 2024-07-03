@@ -704,7 +704,7 @@ fn dual_subs_command_single(
         log::info!("#{index}: syncing subs...");
         sync(&subs_from_video, &subs_from_file, &SyncTool::FFSUBSYNC)?
     };
-    log::info!("stripping HTML from subs...");
+    log::info!("#{index}: stripping HTML from subs...");
     strip_html(&mut subs_from_video)?;
     strip_html(&mut synced_subs_from_file)?;
     // combine provided subs with extracted track
