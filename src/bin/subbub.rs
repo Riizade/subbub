@@ -686,18 +686,23 @@ fn dual_subs_command_single(
     let video_filename = video_file.file_stem().unwrap().to_string_lossy();
 
     // convert video to mkv
+    log::info!("#{index}: converting video to mkv...");
     let mkv_filepath = ffmpeg::convert_to_mkv(video_file)?;
-
-    // check number of sub tracks
-    let sub_tracks = ffmpeg::number_of_subtitle_streams(video_file)?;
     // extract provided track number
+    log::info!("#{index}: extracting reference subs...");
     let subs_from_video = ffmpeg::extract_subtitles(video_file, track)?;
-    // convert provided subs to srt
-    let subs_from_file = ffmpeg::read_subtitles_file(&subtitles_file)?;
-    // sync subs
-    let synced_subs_from_file = sync(&subs_from_video, &subs_from_file, &SyncTool::FFSUBSYNC)?;
+    // convert provided subs to srt and sync
+    // surround in a scope block so that we don't accidentally use the raw subs_from_file in later steps
+    let synced_subs_from_file = {
+        log::info!("#{index}: converting subs to srt...");
+        let subs_from_file = ffmpeg::read_subtitles_file(&subtitles_file)?;
+        // sync subs
+        log::info!("#{index}: syncing subs...");
+        sync(&subs_from_video, &subs_from_file, &SyncTool::FFSUBSYNC)?
+    };
     // combine provided subs with extracted track
-    let merged_subs = merge(&subs_from_video, &subs_from_file)?;
+    log::info!("#{index}: merging subs...");
+    let merged_subs = merge(&subs_from_video, &synced_subs_from_file)?;
 
     // add sub tracks to mkv file
 
@@ -718,6 +723,7 @@ fn dual_subs_command_single(
     merged_subs.write_to_file(&dual_sub_filepath, None)?;
 
     // add single sub track
+    log::info!("#{index}: adding single subs track...");
     mkvmerge::add_subtitles_track(
         &mkv_filepath,
         &single_sub_filepath,
@@ -726,6 +732,7 @@ fn dual_subs_command_single(
         &intermediate_video,
     )?;
     // add dual sub track
+    log::info!("#{index}: adding dual subs track...");
     let final_video = output.join(format!("{0}.mkv", video_filename));
     std::fs::create_dir_all(output)?;
     mkvmerge::add_subtitles_track(
