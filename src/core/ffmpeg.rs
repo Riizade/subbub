@@ -1,5 +1,6 @@
 // functions that invoke ffmpeg
 use anyhow::{anyhow, Context, Result};
+use itertools::Itertools;
 use srtlib::Subtitles;
 use std::{path::Path, process::Command};
 
@@ -115,6 +116,27 @@ pub fn read_subtitles_file(path: &Path) -> Result<Subtitles> {
     let subs = Subtitles::parse_from_file(tmp_file, None)?;
 
     Ok(subs)
+}
+
+pub fn number_of_subtitle_streams(video_file: &Path) -> Result<u32> {
+    let mut command = Command::new("ffprobe");
+    command
+        .arg("-v")
+        .arg("error")
+        .arg("-select_streams")
+        .arg("s")
+        .arg("-show_entries")
+        .arg("stream=index")
+        .arg("-of")
+        .arg("csv=p=0")
+        .arg(video_file.as_os_str());
+    log::debug!("{0}", pretty_cmd(&command));
+    let output = command.output()?;
+    log::trace!("{0}", pretty_output(&output));
+    let stdout =
+        String::from_utf8(output.stdout.clone()).context("could not parse stdout to utf8")?;
+    let len = stdout.split('\n').collect_vec().len();
+    Ok(len as u32)
 }
 
 pub fn convert_to_mkv(video_file: &Path, output_file: &Path) -> Result<()> {

@@ -7,7 +7,9 @@ A CLI frontend for using mkvextract, ffsubsync, dualsub, etc to manage and merge
 Must have the following installed and available in PATH
 
 - https://ffmpeg.org/
+  - including `ffmpeg` and `ffprobe`
 - https://github.com/smacke/ffsubsync
+- https://mkvtoolnix.download/downloads.html
 
 # Usage
 

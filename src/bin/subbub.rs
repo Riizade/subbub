@@ -40,7 +40,7 @@ struct Cli {
 enum Commands {
     /// commands to modify subtitles
     Subtitles(Subtitles),
-    Operations(Operations),
+    CompoundOperations(CompoundOperations),
     /// command for testing
     #[cfg(debug_assertions)]
     Debug,
@@ -68,10 +68,13 @@ struct Subtitles {
 #[clap(verbatim_doc_comment)]
 enum SubtitlesCommand {
     /// converts the given subtitle file(s) to srt format
+    #[clap(verbatim_doc_comment)]
     ConvertSubtitles,
     /// strips html from the given subtitle file(s)
+    #[clap(verbatim_doc_comment)]
     StripHtml,
     /// shifts the timing of the given subtitle(s) earlier or later by the given value in seconds
+    #[clap(verbatim_doc_comment)]
     ShiftTiming {
         /// the number of seconds to shift the subtitle(s)
         #[arg(short = 's', long)]
@@ -81,6 +84,7 @@ enum SubtitlesCommand {
         direction: ShiftDirection,
     },
     /// syncs the timing of the given subtitles(s) to the secondary subtitle(s)
+    #[clap(verbatim_doc_comment)]
     Sync {
         /// the secondary subtitles to add to the given subtitles
         #[arg(short = 'r', long, alias = "reference")]
@@ -95,6 +99,7 @@ enum SubtitlesCommand {
     /// combines the given subtitles with another set of subtitles, creating dual subtitles (displaying both at the same time)
     /// primary subtitles will be displayed below the video
     /// secondary subtitles will be displayed above the video
+    #[clap(verbatim_doc_comment)]
     Combine {
         /// the secondary subtitles to add to the given subtitles
         #[arg(short = 's', long, alias = "secondary")]
@@ -106,12 +111,14 @@ enum SubtitlesCommand {
     /// takes the subtitles from their current directory and places them alongside the videos present in the output directory
     /// also renames them to match the videos
     /// this makes the subtitles discoverable by various media library management applications
+    #[clap(verbatim_doc_comment)]
     MatchVideos {
         /// the suffix to place at the end of the subtitles file to distinguish it from other subtitle files in the same directory
         #[arg(short = 's', long)]
         suffix: Option<String>,
     },
     /// adds given subtitle(s) (-i/--input) to the given video(s) (-v/--video_path)
+    #[clap(verbatim_doc_comment)]
     AddSubtitles {
         /// the path to the video file(s) that will have subtitles added
         #[arg(short = 'v', long)]
@@ -127,15 +134,38 @@ enum SubtitlesCommand {
 
 #[derive(Args, Debug)]
 #[clap(alias = "ops")]
-struct Operations {
+struct CompoundOperations {
     #[clap(subcommand)]
-    command: OperationsCommand,
+    command: CompoundOperationsCommand,
 }
 
 #[derive(Subcommand, Debug)]
 #[clap(verbatim_doc_comment)]
 /// subcommands for common sequences of operations
-enum OperationsCommand {}
+enum CompoundOperationsCommand {
+    /// merges a directory of videos with a directory of subtitles
+    /// adds the subtitles to the video both as a single sub track, and as a dual sub track
+    /// this command performs auxiliary operations such as format conversion and subtitle syncing
+    #[clap(verbatim_doc_comment)]
+    AddDualSubs {
+        /// the directory containing the video files
+        #[arg(short = 'v', long)]
+        videos_path: PathBuf,
+        /// the subtitles track in the video to use as a timing reference
+        #[arg(short = 't', long, alias = "track")]
+        subtitles_track: u32,
+        /// the directory containing the subtitles files
+        #[arg(short = 's', long)]
+        subtitles_path: PathBuf,
+        /// the directory to output the newly created videos to
+        /// WARNING: if you use the same directory as videos_path, the videos may be overwritten
+        #[arg(short = 'o', long)]
+        output_path: PathBuf,
+        /// the language code of the newly added subtitles file
+        #[arg(short = 'c', long, alias = "lang")]
+        language_code: String,
+    },
+}
 
 fn main() {
     let cli = Cli::parse();
@@ -144,7 +174,7 @@ fn main() {
 
     let result = match &cli.command {
         Commands::Subtitles(subtitles) => subtitles_command(&cli.command, subtitles),
-        Commands::Operations(operations) => operations_command(&cli.command, operations),
+        Commands::CompoundOperations(operations) => operations_command(&cli.command, operations),
         #[cfg(debug_assertions)]
         Commands::Debug => debug(),
     };
@@ -578,16 +608,132 @@ fn add_subtitles(
     Ok(())
 }
 
-fn operations_command(_: &Commands, operations: &Operations) -> Result<()> {
-    unimplemented!();
+fn operations_command(_: &Commands, operations: &CompoundOperations) -> Result<()> {
+    match &operations.command {
+        CompoundOperationsCommand::AddDualSubs {
+            videos_path,
+            subtitles_track,
+            subtitles_path,
+            output_path,
+            language_code,
+        } => dual_subs_command(
+            &videos_path,
+            &subtitles_path,
+            *subtitles_track,
+            &language_code,
+            &output_path,
+        ),
+    }?;
+
+    Ok(())
 }
 
-fn anime_command() -> Result<()> {
+fn dual_subs_command(
+    videos_path: &Path,
+    subtitles_path: &Path,
+    track: u32,
+    language_code: &str,
+    output: &Path,
+) -> Result<()> {
+    let mut video_files = list_video_files(videos_path);
+    let mut subtitles_files = list_subtitles_files(subtitles_path);
+
+    if video_files.len() != subtitles_files.len() {
+        return Err(anyhow!(
+            "video and subtitle counts do not match; videos: {0}, subtitles: {1}",
+            video_files.len(),
+            subtitles_files.len()
+        ));
+    }
+
+    video_files.sort();
+    subtitles_files.sort();
+
+    let zipped = zip(video_files, subtitles_files).collect::<Vec<_>>();
+    let errors = zipped
+        .par_iter()
+        .enumerate()
+        .map(|tuple: (usize, &(PathBuf, PathBuf))| {
+            dual_subs_command_single(tuple, track, language_code, output)
+        })
+        .filter(|r| r.is_err())
+        .map(|r| r.err().unwrap())
+        .collect::<Vec<_>>();
+    if !errors.is_empty() {
+        return Err(anyhow!(
+            "one or more operations not successful:\n{0:#?}",
+            errors
+        ));
+    }
+
+    log::info!("done! finished processing all videos");
+
+    Ok(())
+}
+
+fn dual_subs_command_single(
+    tuple: (usize, &(PathBuf, PathBuf)),
+    track: u32,
+    language_code: &str,
+    output: &Path,
+) -> Result<()> {
+    let (index, (video_file, subtitles_file)) = tuple;
+    log::info!("started processing video #{index}");
+    let video_filename = video_file.file_stem().unwrap().to_string_lossy();
+    let mkv_filepath = TMP_DIRECTORY
+        .get()
+        .unwrap()
+        .join(format!("{0}.mkv", video_filename));
+
     // convert video to mkv
+    ffmpeg::convert_to_mkv(video_file, &mkv_filepath)?;
+
     // check number of sub tracks
+    let sub_tracks = ffmpeg::number_of_subtitle_streams(video_file)?;
     // extract provided track number
+    let subs_from_video = ffmpeg::extract_subtitles(video_file, track)?;
     // convert provided subs to srt
+    let subs_from_file = ffmpeg::read_subtitles_file(&subtitles_file)?;
+    // sync subs
+    let synced_subs_from_file = sync(&subs_from_video, &subs_from_file, &SyncTool::FFSUBSYNC)?;
     // combine provided subs with extracted track
+    let merged_subs = merge(&subs_from_video, &subs_from_file)?;
+
     // add sub tracks to mkv file
-    unimplemented!();
+
+    // determine temporary filepaths for subs and videos
+    let intermediate_video = TMP_DIRECTORY
+        .get()
+        .unwrap()
+        .join(format!("{0}-intermediate.mkv", video_filename));
+    let single_sub_filepath = TMP_DIRECTORY
+        .get()
+        .unwrap()
+        .join(format!("{0}-single.srt", video_filename));
+    synced_subs_from_file.write_to_file(&single_sub_filepath, None)?;
+    let dual_sub_filepath = TMP_DIRECTORY
+        .get()
+        .unwrap()
+        .join(format!("{0}-dual.srt", video_filename));
+    merged_subs.write_to_file(&dual_sub_filepath, None)?;
+
+    // add single sub track
+    mkvmerge::add_subtitles_track(
+        &mkv_filepath,
+        &single_sub_filepath,
+        sub_tracks + 1,
+        language_code,
+        &intermediate_video,
+    )?;
+    // add dual sub track
+    let final_video = output.join(format!("{0}.mkv", video_filename));
+    mkvmerge::add_subtitles_track(
+        &intermediate_video,
+        &dual_sub_filepath,
+        sub_tracks + 2,
+        format!("dual-{language_code}").as_str(),
+        &final_video,
+    )?;
+    log::info!("finished processing video #{index}");
+    Ok(())
 }
