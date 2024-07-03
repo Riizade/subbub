@@ -156,9 +156,11 @@ pub fn convert_to_mkv(video_file: &Path) -> Result<PathBuf> {
         format!("{0}.mkv", video_file.file_stem().unwrap().to_string_lossy()).as_str(),
     )?);
     command
-        .arg("-i") // select input subtitles file
+        .arg("-i") // select input video file
         .arg(video_file.as_os_str())
-        .arg("-c") // convert to srt format
+        .arg("-map") // select all streams
+        .arg("0")
+        .arg("-c") // copy streams
         .arg("copy")
         .arg(&output_file) // output file
         ;

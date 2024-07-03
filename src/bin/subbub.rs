@@ -2,6 +2,7 @@
 
 use itertools::Itertools;
 use rayon::prelude::*;
+use std::io::Write;
 use std::iter::zip;
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -123,9 +124,6 @@ enum SubtitlesCommand {
         /// the path to the video file(s) that will have subtitles added
         #[arg(short = 'v', long)]
         video_path: PathBuf,
-        /// the track number that will be assigned to the newly added subtitle track
-        #[arg(short = 'n', long)]
-        new_track: u32,
         /// the language code that will be assigned to the newly added subtitle track
         #[arg(short = 'c', long)]
         language_code: String,
@@ -233,14 +231,12 @@ fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
         }
         SubtitlesCommand::AddSubtitles {
             video_path,
-            new_track,
             language_code,
         } => add_subtitles(
             &subcommand.input,
             subcommand.track,
             &subcommand.output,
             video_path,
-            *new_track,
             language_code,
         )?,
     }
@@ -557,7 +553,6 @@ fn add_subtitles(
     input_track: Option<u32>,
     output: &Path,
     videos_path: &Path,
-    new_track: u32,
     language_code: &str,
 ) -> Result<()> {
     let mut subtitles = parse_subtitles_input(input, input_track)?;
@@ -604,7 +599,7 @@ fn add_subtitles(
         mkvmerge::add_subtitles_track(
             &video_path,
             &subtitles_path,
-            new_track,
+            Some(language_code),
             language_code,
             &output_path,
         )?;
@@ -665,9 +660,13 @@ fn dual_subs_command(
         .map(|r| r.err().unwrap())
         .collect::<Vec<_>>();
     if !errors.is_empty() {
+        let mut error_vec: Vec<u8> = vec![];
+        for error in errors {
+            writeln!(error_vec, "{error}")?;
+        }
         return Err(anyhow!(
-            "one or more operations not successful:\n{0:#?}",
-            errors
+            "one or more operations not successful:\n{0}",
+            String::from_utf8(error_vec)?
         ));
     }
 
@@ -722,7 +721,7 @@ fn dual_subs_command_single(
     mkvmerge::add_subtitles_track(
         &mkv_filepath,
         &single_sub_filepath,
-        sub_tracks + 1,
+        Some(language_code),
         language_code,
         &intermediate_video,
     )?;
@@ -732,7 +731,7 @@ fn dual_subs_command_single(
     mkvmerge::add_subtitles_track(
         &intermediate_video,
         &dual_sub_filepath,
-        sub_tracks + 2,
+        None,
         format!("dual-{language_code}").as_str(),
         &final_video,
     )?;

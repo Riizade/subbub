@@ -9,19 +9,22 @@ use super::data::hash_string;
 pub fn add_subtitles_track(
     video_file: &Path,
     subtitles_file: &Path,
-    track_number: u32,
-    language_code: &str,
+    language_code: Option<&str>,
+    track_name: &str,
     output_path: &Path,
 ) -> Result<()> {
     let mut command = Command::new("mkvmerge");
+    if let Some(code) = language_code {
+        command
+            .arg("--language") // add the language code
+            .arg(format!("0:{code}"));
+    }
     command
         .arg("-o") // specify the output path
         .arg(output_path)
         .arg(video_file)// input the video file
-        .arg("--language") // add the language code
-        .arg(format!("{track_number}:{language_code}"))
         .arg("--track-name") // name the track
-        .arg(format!("{track_number}:{language_code}"))
+        .arg(format!("0:{track_name}"))
         .arg(subtitles_file)// input the subtitles file
         ;
 
