@@ -19,7 +19,7 @@ use subbub::core::data::{ShiftDirection, SubtitleSource};
 use subbub::core::ffmpeg::read_subtitles_file;
 use subbub::core::log::initialize_logging;
 use subbub::core::merge::merge;
-use subbub::core::modify;
+use subbub::core::modify::{self, strip_html};
 use subbub::core::sync::sync;
 use subbub::core::{ffmpeg, mkvmerge};
 
@@ -213,7 +213,7 @@ fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
     log::debug!("executing command {subcommand:#?}");
     match &subcommand.command {
         SubtitlesCommand::ConvertSubtitles => convert_subtitles(&merged_io)?,
-        SubtitlesCommand::StripHtml => strip_html(&merged_io)?,
+        SubtitlesCommand::StripHtml => strip_html_from_dir(&merged_io)?,
         SubtitlesCommand::ShiftTiming { seconds, direction } => {
             shift_seconds(&merged_io, *seconds, *direction)?
         }
@@ -392,7 +392,7 @@ fn convert_subtitles(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
     Ok(())
 }
 
-fn strip_html(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
+fn strip_html_from_dir(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
     let result: Result<()> = merged_io
         .par_iter()
         .map(|io| {
@@ -635,6 +635,10 @@ fn dual_subs_command(
     language_code: &str,
     output: &Path,
 ) -> Result<()> {
+    if videos_path == output {
+        return Err(anyhow!("videos path and output path are the same, this could cause overwriting of the original video files\nplease choose a different output path"));
+    }
+
     let mut video_files = list_video_files(videos_path);
     let mut subtitles_files = list_subtitles_files(subtitles_path);
 
@@ -690,16 +694,19 @@ fn dual_subs_command_single(
     let mkv_filepath = ffmpeg::convert_to_mkv(video_file)?;
     // extract provided track number
     log::info!("#{index}: extracting reference subs...");
-    let subs_from_video = ffmpeg::extract_subtitles(video_file, track)?;
+    let mut subs_from_video = ffmpeg::extract_subtitles(video_file, track)?;
     // convert provided subs to srt and sync
     // surround in a scope block so that we don't accidentally use the raw subs_from_file in later steps
-    let synced_subs_from_file = {
+    let mut synced_subs_from_file = {
         log::info!("#{index}: converting subs to srt...");
         let subs_from_file = ffmpeg::read_subtitles_file(&subtitles_file)?;
         // sync subs
         log::info!("#{index}: syncing subs...");
         sync(&subs_from_video, &subs_from_file, &SyncTool::FFSUBSYNC)?
     };
+    log::info!("stripping HTML from subs...");
+    strip_html(&mut subs_from_video)?;
+    strip_html(&mut synced_subs_from_file)?;
     // combine provided subs with extracted track
     log::info!("#{index}: merging subs...");
     let merged_subs = merge(&subs_from_video, &synced_subs_from_file)?;
