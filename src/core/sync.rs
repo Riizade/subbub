@@ -37,6 +37,12 @@ fn sync_ffsubsync(reference: &Subtitles, unsynced: &Subtitles) -> Result<Subtitl
         .arg(reference_file.as_os_str())
         .arg("-i")
         .arg(unsynced_file.as_os_str())
+        .arg("--encoding") // ensure we use only utf-8 for encoding because the encoding inference gets it wrong sometimes
+        .arg("utf-8")
+        .arg("--reference-encoding")
+        .arg("utf-8")
+        .arg("--output-encoding")
+        .arg("utf-8")
         .arg("-o")
         .arg(tmp_file.as_os_str());
     log::debug!("{0}", pretty_cmd(&command));
