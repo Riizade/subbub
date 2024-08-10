@@ -6,3 +6,5 @@
   - sync to audio
   - sync to image subtitle file (PGS, etc)
 - update arguments to allow selecting _exactly one_ of the subtitle syncing options
+- split add-dual-subs into add-synced-subs and add-dual-subs
+- add command to do both of the above (add-and-combine-subs?)
