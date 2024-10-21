@@ -8,3 +8,13 @@
 - update arguments to allow selecting _exactly one_ of the subtitle syncing options
 - split add-dual-subs into add-synced-subs and add-dual-subs
 - add command to do both of the above (add-and-combine-subs?)
+
+# Notes
+
+- alternative sync solutions
+  - ffsubsync with no reference attempts to use audio
+  - https://github.com/oseiskar/autosubsync
+  - https://github.com/kaegi/alass
+  - https://github.com/sc0ty/subsync
+  - https://github.com/oseiskar/autosubsync
+  - https://github.com/pums974/srtsync
