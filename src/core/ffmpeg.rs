@@ -117,7 +117,8 @@ pub fn read_subtitles_file(path: &Path) -> Result<Subtitles> {
     log::trace!("{0}", pretty_output(&output));
 
     log::debug!("reading from temporary file {tmp_file:#?} converted from {path:#?}");
-    let subs = Subtitles::parse_from_file(tmp_file, None)?;
+    let subs = Subtitles::parse_from_file(&tmp_file, None)
+        .context(format!("could not parse subtitle file {tmp_file:#?}"))?;
 
     Ok(subs)
 }
