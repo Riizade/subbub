@@ -78,6 +78,50 @@ pub fn list_subtitles_files(directory: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+pub enum VideoSource {
+    File(PathBuf),
+    Directory(PathBuf),
+}
+
+impl VideoSource {
+    pub fn to_videos(&self) -> Result<Vec<PathBuf>> {
+        match self {
+            VideoSource::File(pathbuf) => {
+                if pathbuf.exists() && is_video_file(pathbuf) {
+                    Ok(vec![pathbuf.clone()])
+                } else {
+                    Err(anyhow::anyhow!(
+                        "File does not exist or is not a valid video file: {}",
+                        pathbuf.to_string_lossy()
+                    ))
+                }
+            }
+            VideoSource::Directory(pathbuf) => {
+                if pathbuf.exists() && pathbuf.is_dir() {
+                    Ok(list_video_files(pathbuf))
+                } else {
+                    Err(anyhow::anyhow!(
+                        "Directory does not exist: {}",
+                        pathbuf.to_string_lossy()
+                    ))
+                }
+            }
+        }
+    }
+}
+
+impl From<PathBuf> for VideoSource {
+    fn from(pathbuf: PathBuf) -> Self {
+        if pathbuf.is_dir() {
+            VideoSource::Directory(pathbuf)
+        } else if pathbuf.is_file() && is_video_file(&pathbuf) {
+            VideoSource::File(pathbuf)
+        } else {
+            panic!("Invalid video source: {}", pathbuf.to_string_lossy());
+        }
+    }
+}
+
 pub enum SubtitleSource {
     File(PathBuf),
     VideoTrack {
