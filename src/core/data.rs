@@ -7,7 +7,7 @@ use srtlib::Subtitles;
 use std::{
     fmt::Display,
     hash::{DefaultHasher, Hash, Hasher},
-    path::{Path, PathBuf},
+    path::{self, Path, PathBuf},
     process::{Command, Output},
 };
 
@@ -84,6 +84,7 @@ pub enum SubtitleSource {
         video_file: PathBuf,
         subtitle_track: u32,
     },
+    Directory(PathBuf),
 }
 
 impl From<String> for SubtitleSource {
@@ -104,6 +105,19 @@ impl From<String> for SubtitleSource {
         // otherwise, we assume it's a file path
         else {
             let pathbuf = PathBuf::from(s);
+            if !pathbuf.exists() {
+                panic!(
+                    "File or directory does not exist: {}",
+                    pathbuf.to_string_lossy()
+                );
+            } else if pathbuf.exists() && pathbuf.is_file() && is_subtitle_file(&pathbuf) {
+                // if the file exists and is a subtitle file, we return it as a file source
+                return SubtitleSource::File(pathbuf);
+            } else if pathbuf.is_dir() {
+                return SubtitleSource::Directory(pathbuf);
+            } else if pathbuf.is_file() {
+                return SubtitleSource::File(pathbuf);
+            }
             SubtitleSource::File(pathbuf)
         }
     }
@@ -113,6 +127,7 @@ impl From<SubtitleSource> for String {
     fn from(source: SubtitleSource) -> Self {
         match source {
             SubtitleSource::File(pathbuf) => pathbuf.to_string_lossy().to_string(),
+            SubtitleSource::Directory(pathbuf) => pathbuf.to_string_lossy().to_string(),
             SubtitleSource::VideoTrack {
                 video_file,
                 subtitle_track,
@@ -138,7 +153,7 @@ pub enum ShiftDirection {
 }
 
 impl SubtitleSource {
-    pub fn to_subtitles(&self) -> Result<Subtitles> {
+    pub fn to_subtitles(&self) -> Result<Vec<Subtitles>> {
         match self {
             SubtitleSource::File(pathbuf) => {
                 let extension = pathbuf.extension().unwrap();
@@ -149,14 +164,26 @@ impl SubtitleSource {
                     // otherwise, we need to convert the file using ffmpeg first
                     ffmpeg::read_subtitles_file(pathbuf)?
                 };
-                Ok(subtitles)
+                Ok(vec![subtitles])
             }
             SubtitleSource::VideoTrack {
                 video_file,
                 subtitle_track,
             } => {
                 let s = ffmpeg::extract_subtitles(video_file, *subtitle_track)?;
-                Ok(s)
+                Ok(vec![s])
+            }
+            SubtitleSource::Directory(pathbuf) => {
+                let mut subtitles = Vec::new();
+                for entry in pathbuf.read_dir()? {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if is_subtitle_file(&path) {
+                        let s = Subtitles::parse_from_file(&path, None)?;
+                        subtitles.push(s);
+                    }
+                }
+                Ok(subtitles)
             }
         }
     }
