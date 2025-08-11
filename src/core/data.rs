@@ -86,6 +86,41 @@ pub enum SubtitleSource {
     },
 }
 
+impl From<String> for SubtitleSource {
+    fn from(s: String) -> Self {
+        // if the string contains a ":" character, we parse it as a video track
+        if s.contains(':') {
+            let parts: Vec<&str> = s.split(':').collect();
+            if parts.len() != 2 {
+                panic!("Invalid video track format: {}", s);
+            }
+            let video_file = PathBuf::from(parts[0]);
+            let subtitle_track: u32 = parts[1].parse().expect("Invalid subtitle track number");
+            return SubtitleSource::VideoTrack {
+                video_file,
+                subtitle_track,
+            };
+        }
+        // otherwise, we assume it's a file path
+        else {
+            let pathbuf = PathBuf::from(s);
+            SubtitleSource::File(pathbuf)
+        }
+    }
+}
+
+impl From<SubtitleSource> for String {
+    fn from(source: SubtitleSource) -> Self {
+        match source {
+            SubtitleSource::File(pathbuf) => pathbuf.to_string_lossy().to_string(),
+            SubtitleSource::VideoTrack {
+                video_file,
+                subtitle_track,
+            } => format!("{}:{}", video_file.to_string_lossy(), subtitle_track),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, ValueEnum, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum SyncTool {
