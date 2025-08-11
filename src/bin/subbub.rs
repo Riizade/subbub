@@ -10,7 +10,7 @@ use std::{fs, hash};
 
 use anyhow::{anyhow, Error};
 use anyhow::{Context, Result};
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 use log::LevelFilter;
 use srtlib::Subtitles as SrtSubtitles;
 use subbub::core::data::{hash_subtitles, is_video_file, SyncTool};
@@ -48,15 +48,45 @@ enum Commands {
 }
 
 #[derive(Args, Debug)]
+#[clap(group(ArgGroup::new("subtitle").required(true).multiple(false)))]
+struct SubtitleArgs {
+    /// the input file or directory containing subtitles
+    /// for subtitle tracks contained video files, use the format {filename}:{track_number}
+    #[arg(short = 's', long, verbatim_doc_comment)]
+    subtitles: String,
+}
+
+#[derive(Args, Debug)]
+#[clap(group(ArgGroup::new("video").required(true).multiple(false)))]
+struct VideoArgs {
+    /// the input file or directory containing video file(s)
+    #[arg(short = 'v', long, verbatim_doc_comment)]
+    video: String,
+}
+
+#[derive(Args, Debug)]
+#[clap(group(ArgGroup::new("output").required(true).multiple(false)))]
+struct OutputArgs {
+    /// the output file or directory where the modified entities will be saved
+    #[arg(short = 'o', long, verbatim_doc_comment)]
+    output: PathBuf,
+}
+
+#[derive(Args, Debug)]
+#[clap(group(ArgGroup::new("language_code").required(true).multiple(false)))]
+struct LanguageCodeArgs {
+    /// the language code to assign to the subtitle track(s)
+    #[arg(short = 'l', long, verbatim_doc_comment)]
+    language_code: String,
+}
+
+#[derive(Args, Debug)]
 #[clap(alias = "subs")]
 struct Subtitles {
     /// the subtitles used as input
     /// this may be a subtitles file, a video file, or a directory containing either subtitles files or video files
     #[arg(short = 'i', long, verbatim_doc_comment)]
-    input: PathBuf,
-    /// the subtitles track to use if the input is a video
-    #[arg(short = 't', long, verbatim_doc_comment)]
-    track: Option<u32>,
+    input: String,
     /// the location to output the modified subtitles
     /// if the input contains multiple subtitles, this will be considered a directory, otherwise, a filename
     #[arg(short = 'o', long, verbatim_doc_comment)]
