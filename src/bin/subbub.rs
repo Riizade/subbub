@@ -513,8 +513,8 @@ fn combine_subs(
     }
 
     // sort to make sure we match the correct pairs
-    primary_subtitles.sort_by(|a, b| a.path.cmp(&b.path));
-    secondary_subtitles.sort_by(|a, b| a.path.cmp(&b.path));
+    primary_subtitles.sort();
+    secondary_subtitles.sort();
 
     let zipped = zip(primary_subtitles, secondary_subtitles).collect::<Vec<_>>();
     let result: Result<Vec<(&Path, Vec<u8>)>> = zipped
@@ -543,29 +543,36 @@ fn match_videos(
     video_path: &VideoArgs,
     suffix: Option<&str>,
 ) -> Result<()> {
-    let parent_dir = input.file_stem().unwrap().to_string_lossy();
+    let mut input_subs = input.parse()?.to_subtitles()?;
+
+    let parent_dir = input_subs
+        .first()
+        .expect("input subtitles does not contain any subtitles files")
+        .path
+        .file_stem()
+        .expect("input subtitles has no file stem")
+        .to_string_lossy();
     let default_extension = format!(".{0}", parent_dir);
     let suffix_str = suffix.unwrap_or_else(|| &default_extension);
-    let mut inputs = list_subtitles_files(input);
-    let mut videos = list_video_files(output);
+    let mut videos = video_path.parse()?.to_videos()?;
 
-    if inputs.len() != videos.len() {
-        return Err(anyhow!("number of subtitles and number of videos are not the same:\n    videos: {0}\n    subtitles: {1}", videos.len(), inputs.len()));
+    if input_subs.len() != videos.len() {
+        return Err(anyhow!("number of subtitles and number of videos are not the same:\n    videos: {0}\n    subtitles: {1}", videos.len(), input_subs.len()));
     }
 
-    inputs.sort();
+    input_subs.sort();
     videos.sort();
 
-    let result: Result<()> = zip(inputs, videos)
+    let result: Result<()> = zip(input_subs, videos)
         .par_bridge()
         .map(|(subtitle, video)| {
             let video_name = video.file_stem().unwrap();
             let output_filename = PathBuf::from(format!(
                 "{0}{1}.srt",
-                output.join(video_name).to_string_lossy(),
+                output.output.join(video_name).to_string_lossy(),
                 suffix_str
             ));
-            std::fs::copy(subtitle, output_filename)?;
+            std::fs::copy(subtitle.path, output_filename)?;
             Ok(())
         })
         .collect();
@@ -630,7 +637,7 @@ fn add_subtitles(
     }
 
     videos.sort();
-    subtitles.sort_by(|a, b| a.path.cmp(&b.path));
+    subtitles.sort();
 
     let units = zip(&subtitles, videos).collect_vec();
     for (subs, video_path) in units {

@@ -224,6 +224,26 @@ impl DiskSubtitles {
     }
 }
 
+impl PartialEq for DiskSubtitles {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+
+impl PartialOrd for DiskSubtitles {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.path.partial_cmp(&other.path)
+    }
+}
+
+impl Eq for DiskSubtitles {}
+
+impl Ord for DiskSubtitles {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.path.cmp(&other.path)
+    }
+}
+
 impl SubtitleSource {
     pub fn to_subtitles(&self) -> Result<Vec<DiskSubtitles>> {
         match self {
