@@ -3,6 +3,7 @@
 use itertools::Itertools;
 use rayon::prelude::*;
 use rayon::str::Bytes;
+use std::f32::consts::E;
 use std::io::Write;
 use std::iter::zip;
 use std::path::{Path, PathBuf};
@@ -413,6 +414,11 @@ fn convert_subtitles(input: &SubtitleArgs, output: &OutputArgs) -> Result<()> {
     let bytes: Vec<(&Path, Vec<u8>)> = input_subs
         .par_iter()
         .map(|subtitles| {
+            log::debug!(
+                "converting subtitles from {0:#?} to {1:#?}",
+                subtitles.path,
+                output_path
+            );
             (
                 subtitles.path.as_path(),
                 subtitles.subtitles_string().into_bytes(),
@@ -423,28 +429,32 @@ fn convert_subtitles(input: &SubtitleArgs, output: &OutputArgs) -> Result<()> {
     Ok(())
 }
 
-fn strip_html_from_dir(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
-    let result: Result<()> = merged_io
-        .par_iter()
-        .map(|io| {
-            let mut subs = io.subtitles.clone();
+fn strip_html_from_dir(input: &SubtitleArgs, output: &OutputArgs) -> Result<()> {
+    let mut input_subs = input.parse()?.to_subtitles()?;
+    let output_path = output.output.as_path();
+    std::fs::create_dir_all(output_path)?;
+    let results: Result<Vec<(&Path, Vec<u8>)>> = input_subs
+        .par_iter_mut()
+        .map(|subtitles| {
             log::debug!(
-                "stripping html from {0:#?} and saving to {1:#?}",
-                &io.input_path,
-                &io.output_path
+                "stripping html from subtitles at {0:#?} and saving to {1:#?}",
+                subtitles.path,
+                output_path
             );
-            modify::strip_html(&mut subs)?;
-            std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
-            subs.write_to_file(&io.output_path, None)?;
-            Ok(())
+            modify::strip_html(&mut subtitles.subtitles)?;
+            Ok((
+                subtitles.path.as_path(),
+                subtitles.subtitles_string().into_bytes(),
+            ))
         })
         .collect();
-    result?;
+    write_to_output(output_path, &results?)?;
     Ok(())
 }
 
 fn shift_seconds(
-    merged_io: &Vec<SubtitlesIO>,
+    input: &SubtitleArgs,
+    output: &OutputArgs,
     mut seconds: f32,
     direction: ShiftDirection,
 ) -> Result<()> {
@@ -452,63 +462,65 @@ fn shift_seconds(
         ShiftDirection::EARLIER => seconds = -1.0 * seconds,
         _ => (),
     }
-    let result: Result<()> = merged_io
-        .par_iter()
-        .map(|io| {
-            let subtitles = &io.subtitles;
+
+    let mut input_subs = input.parse()?.to_subtitles()?;
+    let output_path = output.output.as_path();
+    std::fs::create_dir_all(output_path)?;
+    let results: Result<Vec<(&Path, Vec<u8>)>> = input_subs
+        .par_iter_mut()
+        .map(|subtitles| {
             log::debug!(
                 "shifting timing of {0:#?} and saving to {1:#?}",
-                &io.input_path,
-                &io.output_path
+                subtitles.path,
+                output_path
             );
-            let shifted = modify::shift_seconds(subtitles, seconds)?;
-            std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
-            shifted.write_to_file(&io.output_path, None)?;
-            Ok(())
+            Ok((
+                subtitles.path.as_path(),
+                modify::shift_seconds(&subtitles.subtitles, seconds)?
+                    .to_string()
+                    .into_bytes(),
+            ))
         })
         .collect();
-    result?;
+    write_to_output(output_path, &results?)?;
     Ok(())
 }
 
 fn combine_subs(
-    mut merged_io: Vec<SubtitlesIO>,
-    secondary_subtitles: &Path,
-    secondary_track: Option<u32>,
+    input: &SubtitleArgs,
+    output: &OutputArgs,
+    secondary_subtitles_string: &str,
 ) -> Result<()> {
-    let mut secondary_input = parse_subtitles_input(secondary_subtitles, secondary_track)?;
-    if secondary_input.len() != merged_io.len() {
-        return Err(anyhow!("primary and secondary subtitle inputs have different lengths, cannot match them to combine:\n    primary: {0}\n    secondary: {1}", merged_io.len(), secondary_input.len()));
-    }
+    let mut primary_subtitles = input.parse()?.to_subtitles()?;
+    let mut secondary_subtitles =
+        SubtitleSource::try_from(secondary_subtitles_string)?.to_subtitles()?;
 
     // sort to make sure we match the correct pairs
-    merged_io.sort_by_key(|io| io.input_path.clone());
-    secondary_input.sort_by_key(|i| i.0.clone());
+    primary_subtitles.sort_by(|a, b| a.path.cmp(&b.path));
+    secondary_subtitles.sort_by(|a, b| a.path.cmp(&b.path));
 
-    let zipped = zip(merged_io, secondary_input);
-    let result: Result<()> = zipped
-        .par_bridge()
-        .map(|(io, (secondary_input, secondary_subtitles))| {
+    let zipped = zip(primary_subtitles, secondary_subtitles).collect::<Vec<_>>();
+    let result: Result<Vec<(&Path, Vec<u8>)>> = zipped
+        .par_iter()
+        .map(|(primary, secondary)| {
             log::debug!(
                 "combining {0:#?} with {1:#?} and saving to {2:#?}",
-                &io.input_path,
-                &secondary_input,
-                &io.output_path
+                &primary.path,
+                &secondary.path,
+                &output.output
             );
-            std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
-            let primary_subtitles = &io.subtitles;
-            let output_path = &io.output_path;
-            let merged_subs = merge(&primary_subtitles, &secondary_subtitles)?;
-            merged_subs.write_to_file(output_path, None)?;
-            Ok(())
+            let merged_subs = merge(&primary.subtitles, &secondary.subtitles)?;
+            let bytes = merged_subs.to_string().into_bytes();
+            Ok((primary.path.as_path(), bytes))
         })
         .collect();
-    result?;
+
+    write_to_output(&output.output, &result?)?;
 
     Ok(())
 }
 
-fn match_videos(input: &Path, output: &Path, suffix: Option<&str>) -> Result<()> {
+fn match_videos(input: &SubtitleArgs, output: &OutputArgs, suffix: Option<&str>) -> Result<()> {
     let parent_dir = input.file_stem().unwrap().to_string_lossy();
     let default_extension = format!(".{0}", parent_dir);
     let suffix_str = suffix.unwrap_or_else(|| &default_extension);
@@ -542,9 +554,9 @@ fn match_videos(input: &Path, output: &Path, suffix: Option<&str>) -> Result<()>
 }
 
 fn sync_subs(
-    mut merged_io: Vec<SubtitlesIO>,
-    reference_subtitles: &Path,
-    reference_track: Option<u32>,
+    input: &SubtitleArgs,
+    output: &OutputArgs,
+    reference_subtitles: &str,
     sync_tool: SyncTool,
 ) -> Result<()> {
     let mut secondary_input = parse_subtitles_input(reference_subtitles, reference_track)?;
@@ -580,9 +592,8 @@ fn sync_subs(
 }
 
 fn add_subtitles(
-    input: &Path,
-    input_track: Option<u32>,
-    output: &Path,
+    input: &SubtitleArgs,
+    output: &OutputArgs,
     videos_path: &Path,
     language_code: &str,
 ) -> Result<()> {
@@ -784,7 +795,8 @@ fn dual_subs_command_single(
     Ok(())
 }
 
-/// writes the given collection of byte strings to files in the output directory
+/// writes the given collection of (path, byte strings) to files in the output directory using the original file names.
+/// If there is only one file, it writes it directly to the output path.
 fn write_to_output(output: &Path, files: &Vec<(&Path, Vec<u8>)>) -> Result<()> {
     if files.is_empty() {
         return Err(anyhow!("no files to write to output"));
