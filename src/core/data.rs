@@ -213,8 +213,19 @@ pub enum ShiftDirection {
     LATER,
 }
 
+pub struct DiskSubtitles {
+    pub path: PathBuf,
+    pub subtitles: Subtitles,
+}
+
+impl DiskSubtitles {
+    pub fn subtitles_string(&self) -> String {
+        self.subtitles.to_string()
+    }
+}
+
 impl SubtitleSource {
-    pub fn to_subtitles(&self) -> Result<Vec<Subtitles>> {
+    pub fn to_subtitles(&self) -> Result<Vec<DiskSubtitles>> {
         match self {
             SubtitleSource::File(pathbuf) => {
                 let extension = pathbuf.extension().unwrap();
@@ -225,14 +236,20 @@ impl SubtitleSource {
                     // otherwise, we need to convert the file using ffmpeg first
                     ffmpeg::read_subtitles_file(pathbuf)?
                 };
-                Ok(vec![subtitles])
+                Ok(vec![DiskSubtitles {
+                    path: pathbuf.to_owned(),
+                    subtitles,
+                }])
             }
             SubtitleSource::VideoTrack {
                 video_file,
                 subtitle_track,
             } => {
                 let s = ffmpeg::extract_subtitles(video_file, *subtitle_track)?;
-                Ok(vec![s])
+                Ok(vec![DiskSubtitles {
+                    path: video_file.to_owned(),
+                    subtitles: s,
+                }])
             }
             SubtitleSource::Directory(pathbuf) => {
                 let mut subtitles = Vec::new();
@@ -241,7 +258,10 @@ impl SubtitleSource {
                     let path = entry.path();
                     if is_subtitle_file(&path) {
                         let s = Subtitles::parse_from_file(&path, None)?;
-                        subtitles.push(s);
+                        subtitles.push(DiskSubtitles {
+                            path: path.to_owned(),
+                            subtitles: s,
+                        });
                     }
                 }
                 Ok(subtitles)

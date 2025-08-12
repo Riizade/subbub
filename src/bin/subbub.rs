@@ -2,10 +2,11 @@
 
 use itertools::Itertools;
 use rayon::prelude::*;
+use rayon::str::Bytes;
 use std::io::Write;
 use std::iter::zip;
 use std::path::{Path, PathBuf};
-use std::process::exit;
+use std::process::{exit, Output};
 use std::{fs, hash};
 
 use anyhow::{anyhow, Context, Error, Result};
@@ -405,21 +406,20 @@ fn debug() -> Result<()> {
     Ok(())
 }
 
-fn convert_subtitles(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
-    let result: Result<()> = merged_io
+fn convert_subtitles(input: &SubtitleArgs, output: &OutputArgs) -> Result<()> {
+    let input_subs = input.parse()?.to_subtitles()?;
+    let output_path = output.output.as_path();
+    std::fs::create_dir_all(output_path)?;
+    let bytes: Vec<(&Path, Vec<u8>)> = input_subs
         .par_iter()
-        .map(|io| {
-            log::debug!(
-                "converting {0:#?} to {1:#?}",
-                &io.input_path,
-                &io.output_path
-            );
-            std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
-            io.subtitles.write_to_file(&io.output_path, None)?;
-            Ok(())
+        .map(|subtitles| {
+            (
+                subtitles.path.as_path(),
+                subtitles.subtitles_string().into_bytes(),
+            )
         })
         .collect();
-    result?;
+    write_to_output(output_path, &bytes)?;
     Ok(())
 }
 
@@ -781,5 +781,29 @@ fn dual_subs_command_single(
         &final_video,
     )?;
     log::info!("finished processing video #{index}");
+    Ok(())
+}
+
+/// writes the given collection of byte strings to files in the output directory
+fn write_to_output(output: &Path, files: &Vec<(&Path, Vec<u8>)>) -> Result<()> {
+    if files.is_empty() {
+        return Err(anyhow!("no files to write to output"));
+    } else if files.len() == 1 {
+        // if there's only one file, write it directly to the output path
+        let mut file = fs::File::create(output).context("could not create output file")?;
+        file.write_all(&files[0].1)
+            .context("could not write to output file")?;
+        return Ok(());
+    } else {
+        // if there are multiple files, write them to the output directory
+        for (original_file, bytes) in files {
+            let destination_file =
+                output.join(original_file.file_name().context("file has no name")?);
+            let mut file = fs::File::create(&destination_file)
+                .context(format!("could not create file {destination_file:#?}"))?;
+            file.write_all(bytes)
+                .context(format!("could not write to file {destination_file:#?}"))?;
+        }
+    }
     Ok(())
 }
