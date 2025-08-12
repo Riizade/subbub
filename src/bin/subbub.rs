@@ -96,14 +96,6 @@ struct LanguageCodeArgs {
 #[derive(Args, Debug)]
 #[clap(alias = "subs")]
 struct Subtitles {
-    /// the subtitles used as input
-    /// this may be a subtitles file, a video file, or a directory containing either subtitles files or video files
-    #[arg(short = 'i', long, verbatim_doc_comment)]
-    input: String,
-    /// the location to output the modified subtitles
-    /// if the input contains multiple subtitles, this will be considered a directory, otherwise, a filename
-    #[arg(short = 'o', long, verbatim_doc_comment)]
-    output: PathBuf,
     #[clap(subcommand)]
     command: SubtitlesCommand,
 }
@@ -113,13 +105,27 @@ struct Subtitles {
 enum SubtitlesCommand {
     /// converts the given subtitle file(s) to srt format
     #[clap(verbatim_doc_comment)]
-    ConvertSubtitles,
+    ConvertSubtitles {
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
+    },
     /// strips html from the given subtitle file(s)
     #[clap(verbatim_doc_comment)]
-    StripHtml,
+    StripHtml {
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
+    },
     /// shifts the timing of the given subtitle(s) earlier or later by the given value in seconds
     #[clap(verbatim_doc_comment)]
     ShiftTiming {
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
         /// the number of seconds to shift the subtitle(s)
         #[arg(short = 's', long)]
         seconds: f32,
@@ -130,13 +136,16 @@ enum SubtitlesCommand {
     /// syncs the timing of the given subtitles(s) to the secondary subtitle(s)
     #[clap(verbatim_doc_comment)]
     Sync {
-        /// the secondary subtitles to add to the given subtitles
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
+        /// the subtitles to use as a timing reference for the given subtitles
+        /// uses the same specification format as the input subtitles
         #[arg(short = 'r', long, visible_alias = "reference")]
-        reference_subtitles: PathBuf,
-        /// the subtitles track, if the secondary subtitles are contained in a video
-        #[arg(short = 'y', long, visible_alias = "track2")]
-        reference_track: Option<u32>,
+        reference_subtitles: String,
         /// the tool to use to sync the subs
+        /// currently the only tool available is `ffsubsync` (default)
         #[arg(short = 't', long, visible_alias = "tool", default_value = "ffsubsync")]
         sync_tool: SyncTool,
     },
@@ -145,18 +154,24 @@ enum SubtitlesCommand {
     /// secondary subtitles will be displayed above the video
     #[clap(verbatim_doc_comment)]
     Combine {
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
         /// the secondary subtitles to add to the given subtitles
-        #[arg(short = 's', long, visible_alias = "secondary")]
-        secondary_subtitles: PathBuf,
-        /// the subtitles track, if the secondary subtitles are contained in a video
-        #[arg(short = 'y', long, visible_alias = "track2")]
-        secondary_track: Option<u32>,
+        /// uses the same specification format as the input subtitles
+        #[arg(short = 's', long, visible_alias = "reference")]
+        secondary_subtitles: String,
     },
     /// takes the subtitles from their current directory and places them alongside the videos present in the output directory
     /// also renames them to match the videos
     /// this makes the subtitles discoverable by various media library management applications
     #[clap(verbatim_doc_comment)]
     MatchVideos {
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
         /// the suffix to place at the end of the subtitles file to distinguish it from other subtitle files in the same directory
         #[arg(short = 's', long)]
         suffix: Option<String>,
@@ -164,6 +179,10 @@ enum SubtitlesCommand {
     /// adds given subtitle(s) (-i/--input) to the given video(s) (-v/--video_path)
     #[clap(verbatim_doc_comment)]
     AddSubtitles {
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
         /// the path to the video file(s) that will have subtitles added
         #[arg(short = 'v', long)]
         video_path: PathBuf,
@@ -243,72 +262,41 @@ fn main() {
     }
 }
 
-struct SubtitlesIO {
-    input_path: PathBuf,
-    subtitles: SrtSubtitles,
-    output_path: PathBuf,
-}
-
-impl SubtitlesIO {}
-
 fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
-    let merged_io = merge_io(&subcommand.input, subcommand.track, &subcommand.output)?;
     log::debug!("executing command {subcommand:#?}");
     match &subcommand.command {
-        SubtitlesCommand::ConvertSubtitles => convert_subtitles(&merged_io)?,
-        SubtitlesCommand::StripHtml => strip_html_from_dir(&merged_io)?,
-        SubtitlesCommand::ShiftTiming { seconds, direction } => {
-            shift_seconds(&merged_io, *seconds, *direction)?
-        }
+        SubtitlesCommand::ConvertSubtitles { input, output } => convert_subtitles(&input, &output)?,
+        SubtitlesCommand::StripHtml { input, output } => strip_html_from_dir(&input, &output)?,
+        SubtitlesCommand::ShiftTiming {
+            input,
+            output,
+            seconds,
+            direction,
+        } => shift_seconds(&input, &output, *seconds, *direction)?,
         SubtitlesCommand::Sync {
+            input,
+            output,
             reference_subtitles,
-            reference_track,
             sync_tool,
-        } => sync_subs(merged_io, reference_subtitles, *reference_track, *sync_tool)?,
+        } => sync_subs(input, output, reference_subtitles, *sync_tool)?,
         SubtitlesCommand::Combine {
+            input,
+            output,
             secondary_subtitles,
-            secondary_track,
-        } => combine_subs(merged_io, secondary_subtitles, *secondary_track)?,
-        SubtitlesCommand::MatchVideos { suffix } => {
-            match_videos(&subcommand.input, &subcommand.output, suffix.as_deref())?
-        }
+        } => combine_subs(input, output, secondary_subtitles)?,
+        SubtitlesCommand::MatchVideos {
+            input,
+            output,
+            suffix,
+        } => match_videos(input, output, suffix.as_deref())?,
         SubtitlesCommand::AddSubtitles {
+            input,
+            output,
             video_path,
             language_code,
-        } => add_subtitles(
-            &subcommand.input,
-            subcommand.track,
-            &subcommand.output,
-            video_path,
-            language_code,
-        )?,
+        } => add_subtitles(input, output, video_path, language_code)?,
     }
     Ok(())
-}
-
-fn merge_io(input: &Path, track: Option<u32>, output: &Path) -> Result<Vec<SubtitlesIO>> {
-    let input_subs = parse_subtitles_input(input, track)?;
-    if input_subs.len() == 1 {
-        // if there is exactly one entry, the output path is used as a filename
-        let (path, subs) = input_subs.first().unwrap();
-        Ok(vec![SubtitlesIO {
-            input_path: path.to_path_buf(),
-            subtitles: subs.clone(),
-            output_path: output.to_path_buf(),
-        }])
-    } else {
-        Ok(input_subs
-            .iter()
-            .map(|(input_path, subtitles)| {
-                let output_path = output.join(input_path.file_name().unwrap());
-                SubtitlesIO {
-                    input_path: input_path.to_path_buf(),
-                    subtitles: subtitles.clone(),
-                    output_path,
-                }
-            })
-            .collect())
-    }
 }
 
 fn parse_videos(videos: &Vec<PathBuf>, track: u32) -> Result<Vec<(PathBuf, SrtSubtitles)>> {
