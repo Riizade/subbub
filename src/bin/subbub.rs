@@ -54,13 +54,13 @@ struct SubtitleArgs {
     /// the input file or directory containing subtitles
     /// for subtitle tracks contained video files, use the format {filename}:{track_number}
     #[arg(short = 's', long, verbatim_doc_comment)]
-    subtitles: String,
+    subtitles_path: String,
 }
 
 impl SubtitleArgs {
     /// parses the input subtitles path and returns a `SubtitleSource`
     fn parse(&self) -> Result<SubtitleSource> {
-        SubtitleSource::try_from(self.subtitles.as_str())
+        SubtitleSource::try_from(self.subtitles_path.as_str())
     }
 }
 
@@ -69,13 +69,20 @@ impl SubtitleArgs {
 struct VideoArgs {
     /// the input file or directory containing video file(s)
     #[arg(short = 'v', long, verbatim_doc_comment)]
-    video: String,
+    video_path: String,
+}
+
+impl TryInto<VideoSource> for VideoArgs {
+    type Error = anyhow::Error;
+    fn try_into(self) -> Result<VideoSource> {
+        VideoSource::try_from(self.video_path.as_str())
+    }
 }
 
 impl VideoArgs {
     /// parses the input video path and returns a `PathBuf`
     fn parse(&self) -> Result<VideoSource> {
-        VideoSource::try_from(self.video.as_str())
+        VideoSource::try_from(self.video_path.as_str())
     }
 }
 
@@ -129,7 +136,7 @@ enum SubtitlesCommand {
         #[command(flatten)]
         output: OutputArgs,
         /// the number of seconds to shift the subtitle(s)
-        #[arg(short = 's', long)]
+        #[arg(short = 'n', long)]
         seconds: f32,
         /// the direction to shift the subtitles
         #[arg(short = 'd', long)]
@@ -162,7 +169,7 @@ enum SubtitlesCommand {
         output: OutputArgs,
         /// the secondary subtitles to add to the given subtitles
         /// uses the same specification format as the input subtitles
-        #[arg(short = 's', long, visible_alias = "reference")]
+        #[arg(short = 'e', long, visible_alias = "secondary")]
         secondary_subtitles: String,
     },
     /// takes the subtitles from their current directory and places them alongside the videos present in the output directory
@@ -174,20 +181,21 @@ enum SubtitlesCommand {
         input: SubtitleArgs,
         #[command(flatten)]
         output: OutputArgs,
+        #[command(flatten)]
+        video_path: VideoArgs,
         /// the suffix to place at the end of the subtitles file to distinguish it from other subtitle files in the same directory
         #[arg(short = 's', long)]
         suffix: Option<String>,
     },
-    /// adds given subtitle(s) (-i/--input) to the given video(s) (-v/--video_path)
+    /// adds given subtitle(s) (-s/--subtitles) to the given video(s) (-v/--video_path)
     #[clap(verbatim_doc_comment)]
     AddSubtitles {
         #[command(flatten)]
         input: SubtitleArgs,
         #[command(flatten)]
         output: OutputArgs,
-        /// the path to the video file(s) that will have subtitles added
-        #[arg(short = 'v', long)]
-        video_path: PathBuf,
+        #[command(flatten)]
+        video_path: VideoArgs,
         /// the language code that will be assigned to the newly added subtitle track
         #[arg(short = 'c', long)]
         language_code: String,
@@ -289,8 +297,9 @@ fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
         SubtitlesCommand::MatchVideos {
             input,
             output,
+            video_path,
             suffix,
-        } => match_videos(input, output, suffix.as_deref())?,
+        } => match_videos(input, output, video_path, suffix.as_deref())?,
         SubtitlesCommand::AddSubtitles {
             input,
             output,
@@ -495,6 +504,14 @@ fn combine_subs(
     let mut secondary_subtitles =
         SubtitleSource::try_from(secondary_subtitles_string)?.to_subtitles()?;
 
+    if primary_subtitles.len() != secondary_subtitles.len() {
+        return Err(anyhow!(
+            "primary and secondary subtitle inputs have different lengths, cannot match them to combine:\n    primary: {0}\n    secondary: {1}",
+            primary_subtitles.len(),
+            secondary_subtitles.len()
+        ));
+    }
+
     // sort to make sure we match the correct pairs
     primary_subtitles.sort_by(|a, b| a.path.cmp(&b.path));
     secondary_subtitles.sort_by(|a, b| a.path.cmp(&b.path));
@@ -520,7 +537,12 @@ fn combine_subs(
     Ok(())
 }
 
-fn match_videos(input: &SubtitleArgs, output: &OutputArgs, suffix: Option<&str>) -> Result<()> {
+fn match_videos(
+    input: &SubtitleArgs,
+    output: &OutputArgs,
+    video_path: &VideoArgs,
+    suffix: Option<&str>,
+) -> Result<()> {
     let parent_dir = input.file_stem().unwrap().to_string_lossy();
     let default_extension = format!(".{0}", parent_dir);
     let suffix_str = suffix.unwrap_or_else(|| &default_extension);
@@ -594,49 +616,52 @@ fn sync_subs(
 fn add_subtitles(
     input: &SubtitleArgs,
     output: &OutputArgs,
-    videos_path: &Path,
+    video_path: &VideoArgs,
     language_code: &str,
 ) -> Result<()> {
-    let mut subtitles = parse_subtitles_input(input, input_track)?;
-
-    let mut videos = if videos_path.is_dir() {
-        list_video_files(videos_path)
-    } else {
-        vec![videos_path.to_path_buf()]
-    };
-
-    if videos.len() != subtitles.len() {
-        return Err(anyhow!("subtitles and video inputs have different lengths, cannot match them to combine:\n    subtitle: {0}\n    video: {1}", subtitles.len(), videos.len()));
+    let mut subtitles = input.parse()?.to_subtitles()?;
+    let mut videos = video_path.parse()?.to_videos()?;
+    if subtitles.len() != videos.len() {
+        return Err(anyhow!(
+            "subtitles and video inputs have different lengths, cannot match them to combine:\n    subtitles: {0}\n    videos: {1}",
+            subtitles.len(),
+            videos.len()
+        ));
     }
 
     videos.sort();
-    subtitles.sort_by_key(|(path, _)| path.clone());
+    subtitles.sort_by(|a, b| a.path.cmp(&b.path));
 
-    let units = zip(subtitles, videos).collect_vec();
-    for ((input_path, subtitles), video_path) in units {
+    let units = zip(&subtitles, videos).collect_vec();
+    for (subs, video_path) in units {
         // get subtitles path on disk
-        let subtitles_path = if is_video_file(&input_path) {
-            let tmp_filename = format!("add_{0}.srt", hash_subtitles(&subtitles));
+        let subtitles_path = if is_video_file(&video_path) {
+            let tmp_filename = format!("add_{0}.srt", hash_subtitles(&subs.subtitles));
             let tmp_filepath = TMP_DIRECTORY.get().unwrap().join(tmp_filename);
             // if input path is a video file, we'll need to save the extracted subs and point to the extracted path
-            subtitles.write_to_file(&tmp_filepath, None)?;
+            subs.subtitles.write_to_file(&tmp_filepath, None)?;
             tmp_filepath
         } else {
             // if input path is not a video file, we can assume it's a subtitles file and point to the path
-            input_path
+            subs.path.clone()
         };
 
         let output_path = if subtitles.len() == 1 {
             // if there's only one input, the output should be a single file
-            fs::create_dir_all(output.parent().context("output path has no parent")?)?;
-            output.to_path_buf()
+            fs::create_dir_all(
+                output
+                    .output
+                    .parent()
+                    .context("output path has no parent")?,
+            )?;
+            output.output.to_path_buf()
         } else {
             // if there are multiple inputs, we'll use the given output as a directory, and name the output videos the same as their input counterpart
-            fs::create_dir_all(output)?;
+            fs::create_dir_all(output.output.clone())?;
             let filename = video_path
                 .file_name()
                 .context("video file has no file name")?;
-            output.join(filename)
+            output.output.join(filename)
         };
         mkvmerge::add_subtitles_track(
             &video_path,
@@ -677,7 +702,7 @@ fn dual_subs_command(
     language_code: &str,
     output: &Path,
 ) -> Result<()> {
-    if videos_path == output {
+    if videos_path.canonicalize()? == output.canonicalize()? {
         return Err(anyhow!("videos path and output path are the same, this could cause overwriting of the original video files\nplease choose a different output path"));
     }
 
