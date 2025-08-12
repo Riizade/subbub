@@ -8,12 +8,11 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::{fs, hash};
 
-use anyhow::{anyhow, Error};
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Error, Result};
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use log::LevelFilter;
 use srtlib::Subtitles as SrtSubtitles;
-use subbub::core::data::{hash_subtitles, is_video_file, SyncTool};
+use subbub::core::data::{hash_subtitles, is_video_file, SyncTool, VideoSource};
 use subbub::core::data::{list_subtitles_files, list_video_files, TMP_DIRECTORY};
 use subbub::core::data::{ShiftDirection, SubtitleSource};
 use subbub::core::ffmpeg::read_subtitles_file;
@@ -56,12 +55,26 @@ struct SubtitleArgs {
     subtitles: String,
 }
 
+impl SubtitleArgs {
+    /// parses the input subtitles path and returns a `SubtitleSource`
+    fn parse(&self) -> Result<SubtitleSource> {
+        SubtitleSource::try_from(self.subtitles.as_str())
+    }
+}
+
 #[derive(Args, Debug)]
 #[clap(group(ArgGroup::new("video").required(true).multiple(false)))]
 struct VideoArgs {
     /// the input file or directory containing video file(s)
     #[arg(short = 'v', long, verbatim_doc_comment)]
     video: String,
+}
+
+impl VideoArgs {
+    /// parses the input video path and returns a `PathBuf`
+    fn parse(&self) -> Result<VideoSource> {
+        VideoSource::try_from(self.video.as_str())
+    }
 }
 
 #[derive(Args, Debug)]

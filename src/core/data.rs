@@ -1,5 +1,5 @@
 use crate::core::ffmpeg;
-use anyhow::Result;
+use anyhow::{Error, Result};
 use clap::ValueEnum;
 use once_cell::sync::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
@@ -110,14 +110,26 @@ impl VideoSource {
     }
 }
 
-impl From<PathBuf> for VideoSource {
-    fn from(pathbuf: PathBuf) -> Self {
+impl TryFrom<&str> for VideoSource {
+    type Error = anyhow::Error;
+    fn try_from(s: &str) -> Result<Self> {
+        let pathbuf = PathBuf::from(s);
+        return VideoSource::try_from(pathbuf);
+    }
+}
+
+impl TryFrom<PathBuf> for VideoSource {
+    type Error = anyhow::Error;
+    fn try_from(pathbuf: PathBuf) -> Result<Self> {
         if pathbuf.is_dir() {
-            VideoSource::Directory(pathbuf)
+            Ok(VideoSource::Directory(pathbuf))
         } else if pathbuf.is_file() && is_video_file(&pathbuf) {
-            VideoSource::File(pathbuf)
+            Ok(VideoSource::File(pathbuf))
         } else {
-            panic!("Invalid video source: {}", pathbuf.to_string_lossy());
+            Err(anyhow::Error::msg(format!(
+                "Invalid video source: {}",
+                pathbuf.to_string_lossy()
+            )))
         }
     }
 }
@@ -131,8 +143,9 @@ pub enum SubtitleSource {
     Directory(PathBuf),
 }
 
-impl From<String> for SubtitleSource {
-    fn from(s: String) -> Self {
+impl TryFrom<&str> for SubtitleSource {
+    type Error = anyhow::Error;
+    fn try_from(s: &str) -> Result<Self> {
         // if the string contains a ":" character, we parse it as a video track
         if s.contains(':') {
             let parts: Vec<&str> = s.split(':').collect();
@@ -141,28 +154,32 @@ impl From<String> for SubtitleSource {
             }
             let video_file = PathBuf::from(parts[0]);
             let subtitle_track: u32 = parts[1].parse().expect("Invalid subtitle track number");
-            return SubtitleSource::VideoTrack {
+            return Ok(SubtitleSource::VideoTrack {
                 video_file,
                 subtitle_track,
-            };
+            });
         }
         // otherwise, we assume it's a file path
         else {
             let pathbuf = PathBuf::from(s);
             if !pathbuf.exists() {
-                panic!(
+                return Err(anyhow::Error::msg(format!(
                     "File or directory does not exist: {}",
                     pathbuf.to_string_lossy()
-                );
+                )));
             } else if pathbuf.exists() && pathbuf.is_file() && is_subtitle_file(&pathbuf) {
                 // if the file exists and is a subtitle file, we return it as a file source
-                return SubtitleSource::File(pathbuf);
+                return Ok(SubtitleSource::File(pathbuf));
             } else if pathbuf.is_dir() {
-                return SubtitleSource::Directory(pathbuf);
+                return Ok(SubtitleSource::Directory(pathbuf));
             } else if pathbuf.is_file() {
-                return SubtitleSource::File(pathbuf);
+                return Ok(SubtitleSource::File(pathbuf));
+            } else {
+                return Err(anyhow::Error::msg(format!(
+                    "Invalid subtitle source: {}; unknown error occurred",
+                    pathbuf.to_string_lossy()
+                )));
             }
-            SubtitleSource::File(pathbuf)
         }
     }
 }
