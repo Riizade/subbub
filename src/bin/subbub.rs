@@ -2,22 +2,18 @@
 
 use itertools::Itertools;
 use rayon::prelude::*;
-use rayon::str::Bytes;
-use std::f32::consts::E;
+use std::fs;
 use std::io::Write;
 use std::iter::zip;
 use std::path::{Path, PathBuf};
-use std::process::{exit, Output};
-use std::{fs, hash};
+use std::process::exit;
 
-use anyhow::{anyhow, Context, Error, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use log::LevelFilter;
-use srtlib::Subtitles as SrtSubtitles;
 use subbub::core::data::{hash_subtitles, is_video_file, SyncTool, VideoSource};
 use subbub::core::data::{list_subtitles_files, list_video_files, TMP_DIRECTORY};
 use subbub::core::data::{ShiftDirection, SubtitleSource};
-use subbub::core::ffmpeg::read_subtitles_file;
 use subbub::core::log::initialize_logging;
 use subbub::core::merge::merge;
 use subbub::core::modify::{self, strip_html};

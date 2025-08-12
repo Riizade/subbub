@@ -1,13 +1,12 @@
 use crate::core::ffmpeg;
-use anyhow::{Error, Result};
+use anyhow::Result;
 use clap::ValueEnum;
 use once_cell::sync::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
 use srtlib::Subtitles;
 use std::{
-    fmt::Display,
     hash::{DefaultHasher, Hash, Hasher},
-    path::{self, Path, PathBuf},
+    path::{Path, PathBuf},
     process::{Command, Output},
 };
 
