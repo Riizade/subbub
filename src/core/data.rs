@@ -1,5 +1,5 @@
 use crate::core::ffmpeg;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::ValueEnum;
 use once_cell::sync::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
@@ -276,7 +276,8 @@ impl SubtitleSource {
                     let entry = entry?;
                     let path = entry.path();
                     if is_subtitle_file(&path) {
-                        let s = Subtitles::parse_from_file(&path, None)?;
+                        let s = Subtitles::parse_from_file(&path, None)
+                            .context(format!("failed to parse subtitle file {path:#?}"))?;
                         subtitles.push(DiskSubtitles {
                             path: path.to_owned(),
                             subtitles: s,

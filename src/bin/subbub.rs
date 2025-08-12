@@ -45,7 +45,7 @@ enum Commands {
 }
 
 #[derive(Args, Debug)]
-#[clap(group(ArgGroup::new("subtitle").required(true).multiple(false)))]
+#[clap(group(ArgGroup::new("subtitle_args")))]
 struct SubtitleArgs {
     /// the input file or directory containing subtitles
     /// for subtitle tracks contained video files, use the format {filename}:{track_number}
@@ -61,7 +61,7 @@ impl SubtitleArgs {
 }
 
 #[derive(Args, Debug)]
-#[clap(group(ArgGroup::new("video").required(true).multiple(false)))]
+#[clap(group(ArgGroup::new("video_args")))]
 struct VideoArgs {
     /// the input file or directory containing video file(s)
     #[arg(short = 'v', long, verbatim_doc_comment)]
@@ -83,7 +83,7 @@ impl VideoArgs {
 }
 
 #[derive(Args, Debug)]
-#[clap(group(ArgGroup::new("output").required(true).multiple(false)))]
+#[clap(group(ArgGroup::new("output_args")))]
 struct OutputArgs {
     /// the output file or directory where the modified entities will be saved
     #[arg(short = 'o', long, verbatim_doc_comment)]
@@ -91,7 +91,7 @@ struct OutputArgs {
 }
 
 #[derive(Args, Debug)]
-#[clap(group(ArgGroup::new("language_code").required(true).multiple(false)))]
+#[clap(group(ArgGroup::new("language_code_args")))]
 struct LanguageCodeArgs {
     /// the language code to assign to the subtitle track(s)
     #[arg(short = 'l', long, verbatim_doc_comment)]
@@ -131,7 +131,7 @@ enum SubtitlesCommand {
         input: SubtitleArgs,
         #[command(flatten)]
         output: OutputArgs,
-        /// the number of seconds to shift the subtitle(s)
+        /// the number of seconds to shift the subtitle(s) (accepts a floating point value)
         #[arg(short = 'n', long)]
         seconds: f32,
         /// the direction to shift the subtitles
@@ -272,7 +272,7 @@ fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
     log::debug!("executing command {subcommand:#?}");
     match &subcommand.command {
         SubtitlesCommand::ConvertSubtitles { input, output } => convert_subtitles(&input, &output)?,
-        SubtitlesCommand::StripHtml { input, output } => strip_html_from_dir(&input, &output)?,
+        SubtitlesCommand::StripHtml { input, output } => strip_html_command(&input, &output)?,
         SubtitlesCommand::ShiftTiming {
             input,
             output,
@@ -314,7 +314,6 @@ fn debug() -> Result<()> {
 fn convert_subtitles(input: &SubtitleArgs, output: &OutputArgs) -> Result<()> {
     let input_subs = input.parse()?.to_subtitles()?;
     let output_path = output.output.as_path();
-    std::fs::create_dir_all(output_path)?;
     let bytes: Vec<(&Path, Vec<u8>)> = input_subs
         .par_iter()
         .map(|subtitles| {
@@ -333,10 +332,11 @@ fn convert_subtitles(input: &SubtitleArgs, output: &OutputArgs) -> Result<()> {
     Ok(())
 }
 
-fn strip_html_from_dir(input: &SubtitleArgs, output: &OutputArgs) -> Result<()> {
+fn strip_html_command(input: &SubtitleArgs, output: &OutputArgs) -> Result<()> {
     let mut input_subs = input.parse()?.to_subtitles()?;
     let output_path = output.output.as_path();
     std::fs::create_dir_all(output_path)?;
+
     let results: Result<Vec<(&Path, Vec<u8>)>> = input_subs
         .par_iter_mut()
         .map(|subtitles| {
@@ -369,7 +369,6 @@ fn shift_seconds(
 
     let mut input_subs = input.parse()?.to_subtitles()?;
     let output_path = output.output.as_path();
-    std::fs::create_dir_all(output_path)?;
     let results: Result<Vec<(&Path, Vec<u8>)>> = input_subs
         .par_iter_mut()
         .map(|subtitles| {
@@ -503,7 +502,6 @@ fn sync_subs(
                 &reference.path,
                 &output.output
             );
-            std::fs::create_dir_all(&output.output.parent().unwrap())?;
             let synced_subs = sync(&reference.subtitles, &primary.subtitles, &sync_tool)?;
 
             Ok((primary.path.as_path(), synced_subs.to_string().into_bytes()))
