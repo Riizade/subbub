@@ -10,6 +10,11 @@
 - create subtitles from audio using whisper ([which has been added to ffmpeg](https://news.ycombinator.com/item?id=44886647))
 - translate subtitles using DeepL or similar
   - supply API key as a CLI argument
+  - because subtitles between e.g., Japanese and English are structured differently
+    - first merge all subtitles less than say, 500ms apart (showed on-screen consecutively because they're part of the same line)
+    - then translate these merged subtitles
+    - now the translated subtitles are too long, so split them again into smaller chunks
+    - this will not work well if multiple characters are talking
 
 ## Notes
 
