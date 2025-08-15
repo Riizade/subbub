@@ -15,6 +15,7 @@
     - then translate these merged subtitles
     - now the translated subtitles are too long, so split them again into smaller chunks
     - this will not work well if multiple characters are talking
+- a "release" github action that auto-builds binaries for Windows, macOS, and Linux and creates a release page
 
 ## Notes
 
