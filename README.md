@@ -59,23 +59,14 @@ Options:
 ### Sync
 
 Sync subs in the folder `subs` with the subs on track 0 of videos in the current working directory, outputting the synced subs to `synced/`
-`subbub subtitles sync -s ./subs -o ./synced sync -r ./:0`
+`subbub subtitles sync --subtitles-path ./subs --output ./synced --reference-subtitles ./:0`
 
 ### Combine
 
 Combine subs in the folder `ja` with the subs on track 1 of videos in current working directory, outputting them to `dual-ja/`
-`subbub subtitles combine -s ./ja -o ./dual-ja -e ./:1`
+`subbub subtitles combine --subtitles-path ./ja --output ./dual-ja --secondary-subtitles ./:1`
 
 ### Match
 
 Match subs in the folder `subs/` with the videos in the current working directory, moving the subs next to the videos
-`subbub subtitles -i ./subs -o ./ match-videos`
-
-## Create a Release
-
-```bash
-git commit -am "release: {VERSION}"
-git tag "v{VERSION}"
-git push
-git push --tags
-```
+`subbub subtitles match-videos --subtitles-path ./subs --output ./ --video-path ./`
