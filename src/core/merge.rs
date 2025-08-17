@@ -29,7 +29,9 @@ pub fn merge(primary: &Subtitles, secondary: &Subtitles) -> Result<Subtitles> {
     Ok(merged)
 }
 
-fn modify_positioning(sub: &mut Subtitle, primary: bool) -> Result<()> {
+// TODO: remove this allow once the function is implemented
+#[allow(dead_code)]
+fn modify_positioning(_sub: &mut Subtitle, _primary: bool) -> Result<()> {
     // ass/ssa specification: http://www.tcax.org/docs/ass-specs.htm
     // in particular:
 
@@ -51,5 +53,4 @@ fn modify_positioning(sub: &mut Subtitle, primary: bool) -> Result<()> {
     // \an<alignment>         numpad layout
     // Only the first appearance counts.
     todo!();
-    Ok(())
 }

@@ -1,10 +1,8 @@
-use anyhow::{anyhow, Context, Result};
-use srtlib::Subtitles;
+use anyhow::{anyhow, Result};
+
 use std::{path::Path, process::Command};
 
-use crate::core::data::{pretty_cmd, pretty_output, TMP_DIRECTORY};
-
-use super::data::hash_string;
+use crate::core::data::{pretty_cmd, pretty_output};
 
 pub fn add_subtitles_track(
     video_file: &Path,

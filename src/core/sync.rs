@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use srtlib::Subtitles;
-use std::{hash, path::Path, process::Command};
+use std::process::Command;
 
 use crate::core::data::{pretty_cmd, pretty_output};
 

@@ -2,21 +2,18 @@
 
 use itertools::Itertools;
 use rayon::prelude::*;
+use std::fs;
 use std::io::Write;
 use std::iter::zip;
 use std::path::{Path, PathBuf};
 use std::process::exit;
-use std::{fs, hash};
 
-use anyhow::{anyhow, Error};
-use anyhow::{Context, Result};
-use clap::{Args, Parser, Subcommand};
+use anyhow::{anyhow, Context, Result};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 use log::LevelFilter;
-use srtlib::Subtitles as SrtSubtitles;
-use subbub::core::data::{hash_subtitles, is_video_file, SyncTool};
+use subbub::core::data::{hash_subtitles, is_video_file, SyncTool, VideoSource};
 use subbub::core::data::{list_subtitles_files, list_video_files, TMP_DIRECTORY};
 use subbub::core::data::{ShiftDirection, SubtitleSource};
-use subbub::core::ffmpeg::read_subtitles_file;
 use subbub::core::log::initialize_logging;
 use subbub::core::merge::merge;
 use subbub::core::modify::{self, strip_html};
@@ -48,19 +45,62 @@ enum Commands {
 }
 
 #[derive(Args, Debug)]
-#[clap(alias = "subs")]
-struct Subtitles {
-    /// the subtitles used as input
-    /// this may be a subtitles file, a video file, or a directory containing either subtitles files or video files
-    #[arg(short = 'i', long, verbatim_doc_comment)]
-    input: PathBuf,
-    /// the subtitles track to use if the input is a video
-    #[arg(short = 't', long, verbatim_doc_comment)]
-    track: Option<u32>,
-    /// the location to output the modified subtitles
-    /// if the input contains multiple subtitles, this will be considered a directory, otherwise, a filename
+#[clap(group(ArgGroup::new("subtitle_args")))]
+struct SubtitleArgs {
+    /// the input file or directory containing subtitles
+    /// for subtitle tracks contained video files, use the format {filename}:{track_number}
+    #[arg(short = 's', long, verbatim_doc_comment)]
+    subtitles_path: String,
+}
+
+impl SubtitleArgs {
+    /// parses the input subtitles path and returns a `SubtitleSource`
+    fn parse(&self) -> Result<SubtitleSource> {
+        SubtitleSource::try_from(self.subtitles_path.as_str())
+    }
+}
+
+#[derive(Args, Debug)]
+#[clap(group(ArgGroup::new("video_args")))]
+struct VideoArgs {
+    /// the input file or directory containing video file(s)
+    #[arg(short = 'v', long, verbatim_doc_comment)]
+    video_path: String,
+}
+
+impl TryInto<VideoSource> for VideoArgs {
+    type Error = anyhow::Error;
+    fn try_into(self) -> Result<VideoSource> {
+        VideoSource::try_from(self.video_path.as_str())
+    }
+}
+
+impl VideoArgs {
+    /// parses the input video path and returns a `PathBuf`
+    fn parse(&self) -> Result<VideoSource> {
+        VideoSource::try_from(self.video_path.as_str())
+    }
+}
+
+#[derive(Args, Debug)]
+#[clap(group(ArgGroup::new("output_args")))]
+struct OutputArgs {
+    /// the output file or directory where the modified entities will be saved
     #[arg(short = 'o', long, verbatim_doc_comment)]
     output: PathBuf,
+}
+
+#[derive(Args, Debug)]
+#[clap(group(ArgGroup::new("language_code_args")))]
+struct LanguageCodeArgs {
+    /// the language code to assign to the subtitle track(s)
+    #[arg(short = 'l', long, verbatim_doc_comment)]
+    language_code: String,
+}
+
+#[derive(Args, Debug)]
+#[clap(alias = "subs")]
+struct Subtitles {
     #[clap(subcommand)]
     command: SubtitlesCommand,
 }
@@ -70,15 +110,29 @@ struct Subtitles {
 enum SubtitlesCommand {
     /// converts the given subtitle file(s) to srt format
     #[clap(verbatim_doc_comment)]
-    ConvertSubtitles,
+    ConvertSubtitles {
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
+    },
     /// strips html from the given subtitle file(s)
     #[clap(verbatim_doc_comment)]
-    StripHtml,
+    StripHtml {
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
+    },
     /// shifts the timing of the given subtitle(s) earlier or later by the given value in seconds
     #[clap(verbatim_doc_comment)]
     ShiftTiming {
-        /// the number of seconds to shift the subtitle(s)
-        #[arg(short = 's', long)]
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
+        /// the number of seconds to shift the subtitle(s) (accepts a floating point value)
+        #[arg(short = 'n', long)]
         seconds: f32,
         /// the direction to shift the subtitles
         #[arg(short = 'd', long)]
@@ -87,13 +141,16 @@ enum SubtitlesCommand {
     /// syncs the timing of the given subtitles(s) to the secondary subtitle(s)
     #[clap(verbatim_doc_comment)]
     Sync {
-        /// the secondary subtitles to add to the given subtitles
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
+        /// the subtitles to use as a timing reference for the given subtitles
+        /// uses the same specification format as the input subtitles
         #[arg(short = 'r', long, visible_alias = "reference")]
-        reference_subtitles: PathBuf,
-        /// the subtitles track, if the secondary subtitles are contained in a video
-        #[arg(short = 'y', long, visible_alias = "track2")]
-        reference_track: Option<u32>,
+        reference_subtitles: String,
         /// the tool to use to sync the subs
+        /// currently the only tool available is `ffsubsync` (default)
         #[arg(short = 't', long, visible_alias = "tool", default_value = "ffsubsync")]
         sync_tool: SyncTool,
     },
@@ -102,28 +159,39 @@ enum SubtitlesCommand {
     /// secondary subtitles will be displayed above the video
     #[clap(verbatim_doc_comment)]
     Combine {
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
         /// the secondary subtitles to add to the given subtitles
-        #[arg(short = 's', long, visible_alias = "secondary")]
-        secondary_subtitles: PathBuf,
-        /// the subtitles track, if the secondary subtitles are contained in a video
-        #[arg(short = 'y', long, visible_alias = "track2")]
-        secondary_track: Option<u32>,
+        /// uses the same specification format as the input subtitles
+        #[arg(short = 'e', long, visible_alias = "secondary")]
+        secondary_subtitles: String,
     },
     /// takes the subtitles from their current directory and places them alongside the videos present in the output directory
     /// also renames them to match the videos
     /// this makes the subtitles discoverable by various media library management applications
     #[clap(verbatim_doc_comment)]
     MatchVideos {
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
+        #[command(flatten)]
+        video_path: VideoArgs,
         /// the suffix to place at the end of the subtitles file to distinguish it from other subtitle files in the same directory
         #[arg(short = 's', long)]
         suffix: Option<String>,
     },
-    /// adds given subtitle(s) (-i/--input) to the given video(s) (-v/--video_path)
+    /// adds given subtitle(s) (-s/--subtitles) to the given video(s) (-v/--video_path)
     #[clap(verbatim_doc_comment)]
     AddSubtitles {
-        /// the path to the video file(s) that will have subtitles added
-        #[arg(short = 'v', long)]
-        video_path: PathBuf,
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
+        #[command(flatten)]
+        video_path: VideoArgs,
         /// the language code that will be assigned to the newly added subtitle track
         #[arg(short = 'c', long)]
         language_code: String,
@@ -200,173 +268,42 @@ fn main() {
     }
 }
 
-struct SubtitlesIO {
-    input_path: PathBuf,
-    subtitles: SrtSubtitles,
-    output_path: PathBuf,
-}
-
-impl SubtitlesIO {}
-
 fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
-    let merged_io = merge_io(&subcommand.input, subcommand.track, &subcommand.output)?;
     log::debug!("executing command {subcommand:#?}");
     match &subcommand.command {
-        SubtitlesCommand::ConvertSubtitles => convert_subtitles(&merged_io)?,
-        SubtitlesCommand::StripHtml => strip_html_from_dir(&merged_io)?,
-        SubtitlesCommand::ShiftTiming { seconds, direction } => {
-            shift_seconds(&merged_io, *seconds, *direction)?
-        }
+        SubtitlesCommand::ConvertSubtitles { input, output } => convert_subtitles(&input, &output)?,
+        SubtitlesCommand::StripHtml { input, output } => strip_html_command(&input, &output)?,
+        SubtitlesCommand::ShiftTiming {
+            input,
+            output,
+            seconds,
+            direction,
+        } => shift_seconds(&input, &output, *seconds, *direction)?,
         SubtitlesCommand::Sync {
+            input,
+            output,
             reference_subtitles,
-            reference_track,
             sync_tool,
-        } => sync_subs(merged_io, reference_subtitles, *reference_track, *sync_tool)?,
+        } => sync_subs(input, output, reference_subtitles, *sync_tool)?,
         SubtitlesCommand::Combine {
+            input,
+            output,
             secondary_subtitles,
-            secondary_track,
-        } => combine_subs(merged_io, secondary_subtitles, *secondary_track)?,
-        SubtitlesCommand::MatchVideos { suffix } => {
-            match_videos(&subcommand.input, &subcommand.output, suffix.as_deref())?
-        }
+        } => combine_subs(input, output, secondary_subtitles)?,
+        SubtitlesCommand::MatchVideos {
+            input,
+            output,
+            video_path,
+            suffix,
+        } => match_videos(input, output, video_path, suffix.as_deref())?,
         SubtitlesCommand::AddSubtitles {
+            input,
+            output,
             video_path,
             language_code,
-        } => add_subtitles(
-            &subcommand.input,
-            subcommand.track,
-            &subcommand.output,
-            video_path,
-            language_code,
-        )?,
+        } => add_subtitles(input, output, video_path, language_code)?,
     }
     Ok(())
-}
-
-fn merge_io(input: &Path, track: Option<u32>, output: &Path) -> Result<Vec<SubtitlesIO>> {
-    let input_subs = parse_subtitles_input(input, track)?;
-    if input_subs.len() == 1 {
-        // if there is exactly one entry, the output path is used as a filename
-        let (path, subs) = input_subs.first().unwrap();
-        Ok(vec![SubtitlesIO {
-            input_path: path.to_path_buf(),
-            subtitles: subs.clone(),
-            output_path: output.to_path_buf(),
-        }])
-    } else {
-        Ok(input_subs
-            .iter()
-            .map(|(input_path, subtitles)| {
-                let output_path = output.join(input_path.file_name().unwrap());
-                SubtitlesIO {
-                    input_path: input_path.to_path_buf(),
-                    subtitles: subtitles.clone(),
-                    output_path,
-                }
-            })
-            .collect())
-    }
-}
-
-fn parse_videos(videos: &Vec<PathBuf>, track: u32) -> Result<Vec<(PathBuf, SrtSubtitles)>> {
-    let mut subs: Vec<(PathBuf, SrtSubtitles)> = vec![];
-    let mut errors: Vec<Error> = vec![];
-    videos.iter().for_each(|v| {
-        let result = ffmpeg::extract_subtitles(v, track);
-        match result {
-            Ok(s) => subs.push((v.to_path_buf(), s)),
-            Err(e) => errors.push(e),
-        }
-    });
-    if errors.is_empty() {
-        Ok(subs)
-    } else {
-        for error in errors {
-            log::error!(
-                "error:\n{0:#?}\nroot cause:\n{1}\nbacktrace:\n{2}",
-                error,
-                error.root_cause(),
-                error.backtrace()
-            );
-        }
-        Err(anyhow!("encountered errors, see logs"))
-    }
-}
-
-fn parse_subtitles(subtitles: &Vec<PathBuf>) -> Result<Vec<(PathBuf, SrtSubtitles)>> {
-    let mut subs: Vec<(PathBuf, SrtSubtitles)> = vec![];
-    let mut errors: Vec<Error> = vec![];
-    subtitles.iter().for_each(|sub| {
-        let result = ffmpeg::read_subtitles_file(sub);
-        match result {
-            Ok(s) => subs.push((sub.to_path_buf(), s)),
-            Err(e) => errors.push(e),
-        }
-    });
-    if errors.is_empty() {
-        Ok(subs)
-    } else {
-        for error in errors {
-            log::error!(
-                "error:\n{0:#?}\nroot cause:\n{1}\nbacktrace:\n{2}",
-                error,
-                error.root_cause(),
-                error.backtrace()
-            );
-        }
-        Err(anyhow!("encountered errors, see logs"))
-    }
-}
-
-fn parse_subtitles_input(input: &Path, track: Option<u32>) -> Result<Vec<(PathBuf, SrtSubtitles)>> {
-    if input.is_file() {
-        log::trace!("input {input:#?} detected as single video file");
-        if is_video_file(input) {
-            let track = track.context(
-                "when supplying a video file as input, subtitle track must be specified",
-            )?;
-            Ok(vec![(
-                input.to_path_buf(),
-                ffmpeg::extract_subtitles(input, track)?,
-            )])
-        } else {
-            log::trace!("input {input:#?} detected as single subtitles file");
-            Ok(vec![((input.to_path_buf(), read_subtitles_file(input)?))])
-        }
-    } else if input.is_dir() {
-        let videos = list_video_files(input);
-        let subtitles = list_subtitles_files(input);
-        if videos.is_empty() && subtitles.is_empty() {
-            Err(anyhow!(
-                "input directory does not contain any video or subtitles files"
-            ))
-        } else if !videos.is_empty() && !subtitles.is_empty() {
-            Err(anyhow!("input directory contains both videos and subtitles, should contain only one or the other"))
-        } else if !videos.is_empty() {
-            if track.is_none() {
-                return Err(anyhow!(
-                    "when using subtitles from a video file, the track must be specified"
-                ));
-            }
-            log::trace!("input {input:#?} detected as directory of video files");
-            parse_videos(&videos, track.unwrap())
-        } else if !subtitles.is_empty() {
-            if track.is_some() {
-                return Err(anyhow!(
-                    "video track {0} has been specified, but command is not operating on videos",
-                    track.unwrap()
-                ));
-            }
-            log::trace!("input {input:#?} detected as directory of subtitles files");
-            parse_subtitles(&subtitles)
-        } else {
-            unreachable!();
-        }
-    } else {
-        Err(anyhow!(
-            "input path {input:#?} was not a file or directory, are you sure it exists?"
-        ))
-    }
 }
 
 #[cfg(debug_assertions)]
@@ -374,46 +311,54 @@ fn debug() -> Result<()> {
     Ok(())
 }
 
-fn convert_subtitles(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
-    let result: Result<()> = merged_io
+fn convert_subtitles(input: &SubtitleArgs, output: &OutputArgs) -> Result<()> {
+    let input_subs = input.parse()?.to_subtitles()?;
+    let output_path = output.output.as_path();
+    let bytes: Vec<(&Path, Vec<u8>)> = input_subs
         .par_iter()
-        .map(|io| {
+        .map(|subtitles| {
             log::debug!(
-                "converting {0:#?} to {1:#?}",
-                &io.input_path,
-                &io.output_path
+                "converting subtitles from {0:#?} to {1:#?}",
+                subtitles.path,
+                output_path
             );
-            std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
-            io.subtitles.write_to_file(&io.output_path, None)?;
-            Ok(())
+            (
+                subtitles.path.as_path(),
+                subtitles.subtitles_string().into_bytes(),
+            )
         })
         .collect();
-    result?;
+    write_to_output(output_path, &bytes)?;
     Ok(())
 }
 
-fn strip_html_from_dir(merged_io: &Vec<SubtitlesIO>) -> Result<()> {
-    let result: Result<()> = merged_io
-        .par_iter()
-        .map(|io| {
-            let mut subs = io.subtitles.clone();
+fn strip_html_command(input: &SubtitleArgs, output: &OutputArgs) -> Result<()> {
+    let mut input_subs = input.parse()?.to_subtitles()?;
+    let output_path = output.output.as_path();
+    std::fs::create_dir_all(output_path)?;
+
+    let results: Result<Vec<(&Path, Vec<u8>)>> = input_subs
+        .par_iter_mut()
+        .map(|subtitles| {
             log::debug!(
-                "stripping html from {0:#?} and saving to {1:#?}",
-                &io.input_path,
-                &io.output_path
+                "stripping html from subtitles at {0:#?} and saving to {1:#?}",
+                subtitles.path,
+                output_path
             );
-            modify::strip_html(&mut subs)?;
-            std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
-            subs.write_to_file(&io.output_path, None)?;
-            Ok(())
+            modify::strip_html(&mut subtitles.subtitles)?;
+            Ok((
+                subtitles.path.as_path(),
+                subtitles.subtitles_string().into_bytes(),
+            ))
         })
         .collect();
-    result?;
+    write_to_output(output_path, &results?)?;
     Ok(())
 }
 
 fn shift_seconds(
-    merged_io: &Vec<SubtitlesIO>,
+    input: &SubtitleArgs,
+    output: &OutputArgs,
     mut seconds: f32,
     direction: ShiftDirection,
 ) -> Result<()> {
@@ -421,86 +366,107 @@ fn shift_seconds(
         ShiftDirection::EARLIER => seconds = -1.0 * seconds,
         _ => (),
     }
-    let result: Result<()> = merged_io
-        .par_iter()
-        .map(|io| {
-            let subtitles = &io.subtitles;
+
+    let mut input_subs = input.parse()?.to_subtitles()?;
+    let output_path = output.output.as_path();
+    let results: Result<Vec<(&Path, Vec<u8>)>> = input_subs
+        .par_iter_mut()
+        .map(|subtitles| {
             log::debug!(
                 "shifting timing of {0:#?} and saving to {1:#?}",
-                &io.input_path,
-                &io.output_path
+                subtitles.path,
+                output_path
             );
-            let shifted = modify::shift_seconds(subtitles, seconds)?;
-            std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
-            shifted.write_to_file(&io.output_path, None)?;
-            Ok(())
+            Ok((
+                subtitles.path.as_path(),
+                modify::shift_seconds(&subtitles.subtitles, seconds)?
+                    .to_string()
+                    .into_bytes(),
+            ))
         })
         .collect();
-    result?;
+    write_to_output(output_path, &results?)?;
     Ok(())
 }
 
 fn combine_subs(
-    mut merged_io: Vec<SubtitlesIO>,
-    secondary_subtitles: &Path,
-    secondary_track: Option<u32>,
+    input: &SubtitleArgs,
+    output: &OutputArgs,
+    secondary_subtitles_string: &str,
 ) -> Result<()> {
-    let mut secondary_input = parse_subtitles_input(secondary_subtitles, secondary_track)?;
-    if secondary_input.len() != merged_io.len() {
-        return Err(anyhow!("primary and secondary subtitle inputs have different lengths, cannot match them to combine:\n    primary: {0}\n    secondary: {1}", merged_io.len(), secondary_input.len()));
+    let mut primary_subtitles = input.parse()?.to_subtitles()?;
+    let mut secondary_subtitles =
+        SubtitleSource::try_from(secondary_subtitles_string)?.to_subtitles()?;
+
+    if primary_subtitles.len() != secondary_subtitles.len() {
+        return Err(anyhow!(
+            "primary and secondary subtitle inputs have different lengths, cannot match them to combine:\n    primary: {0}\n    secondary: {1}",
+            primary_subtitles.len(),
+            secondary_subtitles.len()
+        ));
     }
 
     // sort to make sure we match the correct pairs
-    merged_io.sort_by_key(|io| io.input_path.clone());
-    secondary_input.sort_by_key(|i| i.0.clone());
+    primary_subtitles.sort();
+    secondary_subtitles.sort();
 
-    let zipped = zip(merged_io, secondary_input);
-    let result: Result<()> = zipped
-        .par_bridge()
-        .map(|(io, (secondary_input, secondary_subtitles))| {
+    let zipped = zip(primary_subtitles, secondary_subtitles).collect::<Vec<_>>();
+    let result: Result<Vec<(&Path, Vec<u8>)>> = zipped
+        .par_iter()
+        .map(|(primary, secondary)| {
             log::debug!(
                 "combining {0:#?} with {1:#?} and saving to {2:#?}",
-                &io.input_path,
-                &secondary_input,
-                &io.output_path
+                &primary.path,
+                &secondary.path,
+                &output.output
             );
-            std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
-            let primary_subtitles = &io.subtitles;
-            let output_path = &io.output_path;
-            let merged_subs = merge(&primary_subtitles, &secondary_subtitles)?;
-            merged_subs.write_to_file(output_path, None)?;
-            Ok(())
+            let merged_subs = merge(&primary.subtitles, &secondary.subtitles)?;
+            let bytes = merged_subs.to_string().into_bytes();
+            Ok((primary.path.as_path(), bytes))
         })
         .collect();
-    result?;
+
+    write_to_output(&output.output, &result?)?;
 
     Ok(())
 }
 
-fn match_videos(input: &Path, output: &Path, suffix: Option<&str>) -> Result<()> {
-    let parent_dir = input.file_stem().unwrap().to_string_lossy();
+fn match_videos(
+    input: &SubtitleArgs,
+    output: &OutputArgs,
+    video_path: &VideoArgs,
+    suffix: Option<&str>,
+) -> Result<()> {
+    let mut input_subs = input.parse()?.to_subtitles()?;
+
+    let parent_dir = input_subs
+        .first()
+        .expect("input subtitles does not contain any subtitles files")
+        .path
+        .file_stem()
+        .expect("input subtitles has no file stem")
+        .to_string_lossy();
     let default_extension = format!(".{0}", parent_dir);
     let suffix_str = suffix.unwrap_or_else(|| &default_extension);
-    let mut inputs = list_subtitles_files(input);
-    let mut videos = list_video_files(output);
+    let mut videos = video_path.parse()?.to_videos()?;
 
-    if inputs.len() != videos.len() {
-        return Err(anyhow!("number of subtitles and number of videos are not the same:\n    videos: {0}\n    subtitles: {1}", videos.len(), inputs.len()));
+    if input_subs.len() != videos.len() {
+        return Err(anyhow!("number of subtitles and number of videos are not the same:\n    videos: {0}\n    subtitles: {1}", videos.len(), input_subs.len()));
     }
 
-    inputs.sort();
+    input_subs.sort();
     videos.sort();
 
-    let result: Result<()> = zip(inputs, videos)
+    let result: Result<()> = zip(input_subs, videos)
         .par_bridge()
         .map(|(subtitle, video)| {
             let video_name = video.file_stem().unwrap();
             let output_filename = PathBuf::from(format!(
                 "{0}{1}.srt",
-                output.join(video_name).to_string_lossy(),
+                output.output.join(video_name).to_string_lossy(),
                 suffix_str
             ));
-            std::fs::copy(subtitle, output_filename)?;
+            std::fs::copy(subtitle.path, output_filename)?;
             Ok(())
         })
         .collect();
@@ -511,90 +477,91 @@ fn match_videos(input: &Path, output: &Path, suffix: Option<&str>) -> Result<()>
 }
 
 fn sync_subs(
-    mut merged_io: Vec<SubtitlesIO>,
-    reference_subtitles: &Path,
-    reference_track: Option<u32>,
+    input: &SubtitleArgs,
+    output: &OutputArgs,
+    reference_subtitles: &str,
     sync_tool: SyncTool,
 ) -> Result<()> {
-    let mut secondary_input = parse_subtitles_input(reference_subtitles, reference_track)?;
-    if secondary_input.len() != merged_io.len() {
-        return Err(anyhow!("primary and secondary subtitle inputs have different lengths, cannot match them to combine:\n    primary: {0}\n    secondary: {1}", merged_io.len(), secondary_input.len()));
+    let mut input_subs = input.parse()?.to_subtitles()?;
+    let mut reference_subs = SubtitleSource::try_from(reference_subtitles)?.to_subtitles()?;
+    if reference_subs.len() != input_subs.len() {
+        return Err(anyhow!("primary and secondary subtitle inputs have different lengths, cannot match them to combine:\n    primary: {0}\n    reference: {1}", input_subs.len(), reference_subs.len()));
     }
 
     // sort to make sure we match the correct pairs
-    merged_io.sort_by_key(|io| io.input_path.clone());
-    secondary_input.sort_by_key(|i| i.0.clone());
+    input_subs.sort();
+    reference_subs.sort();
 
-    let zipped: Vec<_> = zip(merged_io, secondary_input).collect();
-    let result: Result<()> = zipped
+    let zipped: Vec<_> = zip(input_subs, reference_subs).collect();
+    let result: Result<Vec<(&Path, Vec<u8>)>> = zipped
         .par_iter()
-        .map(|(io, (reference_input, reference_subtitles))| {
+        .map(|(primary, reference)| {
             log::debug!(
                 "syncing {0:#?} with {1:#?} and saving to {2:#?}",
-                &io.input_path,
-                &reference_input,
-                &io.output_path
+                &primary.path,
+                &reference.path,
+                &output.output
             );
-            std::fs::create_dir_all(&io.output_path.parent().unwrap())?;
-            let primary_subtitles = &io.subtitles;
-            let output_path = &io.output_path;
-            let synced_subs = sync(&reference_subtitles, &primary_subtitles, &sync_tool)?;
-            synced_subs.write_to_file(output_path, None)?;
-            Ok(())
+            let synced_subs = sync(&reference.subtitles, &primary.subtitles, &sync_tool)?;
+
+            Ok((primary.path.as_path(), synced_subs.to_string().into_bytes()))
         })
         .collect();
-    result?;
+
+    write_to_output(&output.output, &result?)?;
 
     Ok(())
 }
 
 fn add_subtitles(
-    input: &Path,
-    input_track: Option<u32>,
-    output: &Path,
-    videos_path: &Path,
+    input: &SubtitleArgs,
+    output: &OutputArgs,
+    video_path: &VideoArgs,
     language_code: &str,
 ) -> Result<()> {
-    let mut subtitles = parse_subtitles_input(input, input_track)?;
-
-    let mut videos = if videos_path.is_dir() {
-        list_video_files(videos_path)
-    } else {
-        vec![videos_path.to_path_buf()]
-    };
-
-    if videos.len() != subtitles.len() {
-        return Err(anyhow!("subtitles and video inputs have different lengths, cannot match them to combine:\n    subtitle: {0}\n    video: {1}", subtitles.len(), videos.len()));
+    let mut subtitles = input.parse()?.to_subtitles()?;
+    let mut videos = video_path.parse()?.to_videos()?;
+    if subtitles.len() != videos.len() {
+        return Err(anyhow!(
+            "subtitles and video inputs have different lengths, cannot match them to combine:\n    subtitles: {0}\n    videos: {1}",
+            subtitles.len(),
+            videos.len()
+        ));
     }
 
     videos.sort();
-    subtitles.sort_by_key(|(path, _)| path.clone());
+    subtitles.sort();
 
-    let units = zip(subtitles, videos).collect_vec();
-    for ((input_path, subtitles), video_path) in units {
+    let units = zip(&subtitles, videos).collect_vec();
+    for (subs, video_path) in units {
         // get subtitles path on disk
-        let subtitles_path = if is_video_file(&input_path) {
-            let tmp_filename = format!("add_{0}.srt", hash_subtitles(&subtitles));
+        let subtitles_path = if is_video_file(&video_path) {
+            let tmp_filename = format!("add_{0}.srt", hash_subtitles(&subs.subtitles));
             let tmp_filepath = TMP_DIRECTORY.get().unwrap().join(tmp_filename);
             // if input path is a video file, we'll need to save the extracted subs and point to the extracted path
-            subtitles.write_to_file(&tmp_filepath, None)?;
+            subs.subtitles.write_to_file(&tmp_filepath, None)?;
             tmp_filepath
         } else {
             // if input path is not a video file, we can assume it's a subtitles file and point to the path
-            input_path
+            subs.path.clone()
         };
 
         let output_path = if subtitles.len() == 1 {
             // if there's only one input, the output should be a single file
-            fs::create_dir_all(output.parent().context("output path has no parent")?)?;
-            output.to_path_buf()
+            fs::create_dir_all(
+                output
+                    .output
+                    .parent()
+                    .context("output path has no parent")?,
+            )?;
+            output.output.to_path_buf()
         } else {
             // if there are multiple inputs, we'll use the given output as a directory, and name the output videos the same as their input counterpart
-            fs::create_dir_all(output)?;
+            fs::create_dir_all(output.output.clone())?;
             let filename = video_path
                 .file_name()
                 .context("video file has no file name")?;
-            output.join(filename)
+            output.output.join(filename)
         };
         mkvmerge::add_subtitles_track(
             &video_path,
@@ -635,7 +602,7 @@ fn dual_subs_command(
     language_code: &str,
     output: &Path,
 ) -> Result<()> {
-    if videos_path == output {
+    if videos_path.canonicalize()? == output.canonicalize()? {
         return Err(anyhow!("videos path and output path are the same, this could cause overwriting of the original video files\nplease choose a different output path"));
     }
 
@@ -750,5 +717,30 @@ fn dual_subs_command_single(
         &final_video,
     )?;
     log::info!("finished processing video #{index}");
+    Ok(())
+}
+
+/// writes the given collection of (path, byte strings) to files in the output directory using the original file names.
+/// If there is only one file, it writes it directly to the output path.
+fn write_to_output(output: &Path, files: &Vec<(&Path, Vec<u8>)>) -> Result<()> {
+    if files.is_empty() {
+        return Err(anyhow!("no files to write to output"));
+    } else if files.len() == 1 {
+        // if there's only one file, write it directly to the output path
+        let mut file = fs::File::create(output).context("could not create output file")?;
+        file.write_all(&files[0].1)
+            .context("could not write to output file")?;
+        return Ok(());
+    } else {
+        // if there are multiple files, write them to the output directory
+        for (original_file, bytes) in files {
+            let destination_file =
+                output.join(original_file.file_name().context("file has no name")?);
+            let mut file = fs::File::create(&destination_file)
+                .context(format!("could not create file {destination_file:#?}"))?;
+            file.write_all(bytes)
+                .context(format!("could not write to file {destination_file:#?}"))?;
+        }
+    }
     Ok(())
 }
