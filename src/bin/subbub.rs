@@ -180,7 +180,7 @@ enum SubtitlesCommand {
         #[command(flatten)]
         video_path: VideoArgs,
         /// the suffix to place at the end of the subtitles file to distinguish it from other subtitle files in the same directory
-        #[arg(short = 's', long)]
+        #[arg(short = 'x', long)]
         suffix: Option<String>,
     },
     /// adds given subtitle(s) (-s/--subtitles) to the given video(s) (-v/--video_path)
