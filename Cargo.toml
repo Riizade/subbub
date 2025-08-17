@@ -17,3 +17,8 @@ simplelog = "0.12.2"
 log = "0.4.21"
 itertools = "0.13.0"
 rayon = "1.10.0"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
