@@ -1,5 +1,9 @@
 # Todo
 
+## Bugs
+- for add-dual-subs, if output folder does not already exist, fails with "file does not exist"
+
+## Features
 - add alternative subtitle syncing options
   - shift forward/back by h:m:s:ms
   - sync to audio
