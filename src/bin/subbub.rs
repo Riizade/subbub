@@ -727,12 +727,14 @@ fn write_to_output(output: &Path, files: &Vec<(&Path, Vec<u8>)>) -> Result<()> {
         return Err(anyhow!("no files to write to output"));
     } else if files.len() == 1 {
         // if there's only one file, write it directly to the output path
+        create_parent_directory(output)?;
         let mut file = fs::File::create(output).context("could not create output file")?;
         file.write_all(&files[0].1)
             .context("could not write to output file")?;
         return Ok(());
     } else {
         // if there are multiple files, write them to the output directory
+        std::fs::create_dir_all(output)?;
         for (original_file, bytes) in files {
             let destination_file =
                 output.join(original_file.file_name().context("file has no name")?);
@@ -743,4 +745,16 @@ fn write_to_output(output: &Path, files: &Vec<(&Path, Vec<u8>)>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn create_parent_directory(output: &Path) -> Result<()> {
+    match output.parent() {
+        Some(parent) => std::fs::create_dir_all(parent)
+            .context("could not create parent directory for output file"),
+        None => {
+            return Err(anyhow!(
+                "output path has no parent, cannot create parent directory"
+            ));
+        }
+    }
 }
