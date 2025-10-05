@@ -254,8 +254,7 @@ fn main() {
     if !cli.keep_tmp_files {
         let tmp_dir = TMP_DIRECTORY.get().unwrap();
         if tmp_dir.exists() {
-            std::fs::remove_dir_all(TMP_DIRECTORY.get().unwrap())
-                .expect("could not remove tmp directory");
+            std::fs::remove_dir_all(tmp_dir).expect("could not remove tmp directory");
         }
     }
 
@@ -602,6 +601,7 @@ fn dual_subs_command(
     language_code: &str,
     output: &Path,
 ) -> Result<()> {
+    std::fs::create_dir_all(output)?;
     if videos_path.canonicalize()? == output.canonicalize()? {
         return Err(anyhow!("videos path and output path are the same, this could cause overwriting of the original video files\nplease choose a different output path"));
     }
@@ -630,6 +630,7 @@ fn dual_subs_command(
         .filter(|r| r.is_err())
         .map(|r| r.err().unwrap())
         .collect::<Vec<_>>();
+
     if !errors.is_empty() {
         let mut error_vec: Vec<u8> = vec![];
         for error in errors {
