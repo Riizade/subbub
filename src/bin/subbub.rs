@@ -16,7 +16,7 @@ use subbub::core::data::{list_subtitles_files, list_video_files, TMP_DIRECTORY};
 use subbub::core::data::{ShiftDirection, SubtitleSource};
 use subbub::core::log::initialize_logging;
 use subbub::core::merge::merge;
-use subbub::core::modify::{self, strip_html};
+use subbub::core::modify::{self, clean_subtitles};
 use subbub::core::sync::sync;
 use subbub::core::{ffmpeg, mkvmerge};
 
@@ -48,7 +48,8 @@ enum Commands {
 #[clap(group(ArgGroup::new("subtitle_args")))]
 struct SubtitleArgs {
     /// the input file or directory containing subtitles
-    /// for subtitle tracks contained video files, use the format {filename}:{track_number}
+    /// for subtitle tracks contained video files, use the format {path}:{track_number}
+    /// path can be a directory or a file
     #[arg(short = 's', long, verbatim_doc_comment)]
     subtitles_path: String,
 }
@@ -196,6 +197,14 @@ enum SubtitlesCommand {
         #[arg(short = 'c', long)]
         language_code: String,
     },
+    /// extracts subtitle track from the given video file(s)
+    #[clap(verbatim_doc_comment)]
+    ExtractSubtitles {
+        #[command(flatten)]
+        output: OutputArgs,
+        #[command(flatten)]
+        video_track: SubtitleArgs,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -301,6 +310,10 @@ fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
             video_path,
             language_code,
         } => add_subtitles(input, output, video_path, language_code)?,
+        SubtitlesCommand::ExtractSubtitles {
+            output,
+            video_track,
+        } => extract_subtitles(output, video_track)?,
     }
     Ok(())
 }
@@ -344,7 +357,7 @@ fn strip_html_command(input: &SubtitleArgs, output: &OutputArgs) -> Result<()> {
                 subtitles.path,
                 output_path
             );
-            modify::strip_html(&mut subtitles.subtitles)?;
+            modify::clean_subtitles(&mut subtitles.subtitles)?;
             Ok((
                 subtitles.path.as_path(),
                 subtitles.subtitles_string().into_bytes(),
@@ -574,6 +587,50 @@ fn add_subtitles(
     Ok(())
 }
 
+fn extract_subtitles(output: &OutputArgs, video_track: &SubtitleArgs) -> Result<()> {
+    let source = video_track.parse()?;
+    let original_path = match &source {
+        SubtitleSource::Directory(dir) => dir,
+        SubtitleSource::File(file) => file.parent().unwrap_or_else(|| Path::new(".")),
+        SubtitleSource::VideoTrack { path, .. } => path.parent().unwrap_or_else(|| Path::new(".")),
+    };
+    let mut sub_paths = video_track.parse()?.to_subtitles()?;
+
+    sub_paths.sort();
+    for subs in &sub_paths {
+        let output_path = if sub_paths.len() == 1 {
+            // if there's only one input, the output should be a single file
+            fs::create_dir_all(
+                output
+                    .output
+                    .parent()
+                    .context("output path has no parent")?,
+            )?;
+            output.output.to_path_buf()
+        } else {
+            // if there are multiple inputs, we'll use the given output as a directory, and name the output videos the same as their input counterpart
+            fs::create_dir_all(output.output.clone())?;
+
+            let filename = format!(
+                "{0}.srt",
+                original_path
+                    .file_stem()
+                    .context("input video has no file stem")?
+                    .to_string_lossy()
+            );
+            output.output.join(filename)
+        };
+        log::debug!(
+            "extracting subtitles from {0:#?} and saving to {1:#?}",
+            &subs.path,
+            &output_path
+        );
+        fs::write(&output_path, &subs.subtitles.to_string())?;
+    }
+
+    Ok(())
+}
+
 fn operations_command(_: &Commands, operations: &CompoundOperations) -> Result<()> {
     match &operations.command {
         CompoundOperationsCommand::AddDualSubs {
@@ -673,8 +730,8 @@ fn dual_subs_command_single(
         sync(&subs_from_video, &subs_from_file, &SyncTool::FFSUBSYNC)?
     };
     log::info!("#{index}: stripping HTML from subs...");
-    strip_html(&mut subs_from_video)?;
-    strip_html(&mut synced_subs_from_file)?;
+    clean_subtitles(&mut subs_from_video)?;
+    clean_subtitles(&mut synced_subs_from_file)?;
     // combine provided subs with extracted track
     log::info!("#{index}: merging subs...");
     let merged_subs = merge(&subs_from_video, &synced_subs_from_file)?;

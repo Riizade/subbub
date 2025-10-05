@@ -135,10 +135,7 @@ impl TryFrom<PathBuf> for VideoSource {
 
 pub enum SubtitleSource {
     File(PathBuf),
-    VideoTrack {
-        video_file: PathBuf,
-        subtitle_track: u32,
-    },
+    VideoTrack { path: PathBuf, subtitle_track: u32 },
     Directory(PathBuf),
 }
 
@@ -151,10 +148,10 @@ impl TryFrom<&str> for SubtitleSource {
             if parts.len() != 2 {
                 panic!("Invalid video track format: {}", s);
             }
-            let video_file = PathBuf::from(parts[0]);
+            let path = PathBuf::from(parts[0]);
             let subtitle_track: u32 = parts[1].parse().expect("Invalid subtitle track number");
             return Ok(SubtitleSource::VideoTrack {
-                video_file,
+                path,
                 subtitle_track,
             });
         }
@@ -189,9 +186,9 @@ impl From<SubtitleSource> for String {
             SubtitleSource::File(pathbuf) => pathbuf.to_string_lossy().to_string(),
             SubtitleSource::Directory(pathbuf) => pathbuf.to_string_lossy().to_string(),
             SubtitleSource::VideoTrack {
-                video_file,
+                path,
                 subtitle_track,
-            } => format!("{}:{}", video_file.to_string_lossy(), subtitle_track),
+            } => format!("{}:{}", path.to_string_lossy(), subtitle_track),
         }
     }
 }
@@ -261,14 +258,41 @@ impl SubtitleSource {
                 }])
             }
             SubtitleSource::VideoTrack {
-                video_file,
+                path,
                 subtitle_track,
             } => {
-                let s = ffmpeg::extract_subtitles(video_file, *subtitle_track)?;
-                Ok(vec![DiskSubtitles {
+                let video_files: Vec<PathBuf> = if !path.exists() {
+                    return Err(anyhow::anyhow!(
+                        "File does not exist: {}",
+                        path.to_string_lossy()
+                    ));
+                } else if path.is_dir() {
+                    list_video_files(path)
+                } else if path.is_file() && !is_video_file(path) {
+                    return Err(anyhow::anyhow!(
+                        "File is not a valid video file: {}",
+                        path.to_string_lossy()
+                    ));
+                } else if path.is_file() && is_video_file(path) {
+                    vec![path.to_owned()]
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Invalid video source: {}",
+                        path.to_string_lossy()
+                    ));
+                };
+                video_files.iter().map(|video_file| {
+                    let s = match ffmpeg::extract_subtitles(video_file, *subtitle_track).context(format!("failed to extract subtitles from video file {video_file:#?}:{subtitle_track}")) {
+                        Ok(subs) => subs,
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    };
+                    Ok(DiskSubtitles {
                     path: video_file.to_owned(),
                     subtitles: s,
-                }])
+                })
+                }).collect::<Result<Vec<DiskSubtitles>>>()
             }
             SubtitleSource::Directory(pathbuf) => {
                 let mut subtitles = Vec::new();

@@ -4,12 +4,46 @@ use anyhow::Result;
 use scraper::Html;
 use srtlib::Subtitles;
 
+pub fn clean_subtitles(subs: &mut Subtitles) -> Result<()> {
+    strip_html(subs)?;
+    remove_bracketed_info(subs)?;
+    Ok(())
+}
+
 // strips HTML tags from subtitles, removing custom fonts, sizes, and colors
-pub fn strip_html(subs: &mut Subtitles) -> Result<()> {
+fn strip_html(subs: &mut Subtitles) -> Result<()> {
     for subtitle in subs.into_iter() {
         subtitle.text = strip_html_string(&subtitle.text);
     }
     Ok(())
+}
+
+fn remove_bracketed_info(subs: &mut Subtitles) -> Result<()> {
+    for subtitle in subs.into_iter() {
+        subtitle.text = remove_bracketed_info_from_string(&subtitle.text);
+    }
+    Ok(())
+}
+
+fn remove_bracketed_info_from_string(string: &str) -> String {
+    let mut result = String::new();
+    let mut skip = 0;
+    for c in string.chars() {
+        match c {
+            '<' | '{' | '[' => skip += 1,
+            '>' | '}' | ']' => {
+                if skip > 0 {
+                    skip -= 1;
+                }
+            }
+            _ => {
+                if skip == 0 {
+                    result.push(c);
+                }
+            }
+        }
+    }
+    result
 }
 
 fn strip_html_string(string: &str) -> String {
