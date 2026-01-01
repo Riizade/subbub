@@ -11,7 +11,7 @@ use std::process::exit;
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use log::LevelFilter;
-use subbub::core::data::{hash_subtitles, is_video_file, SyncTool, VideoSource};
+use subbub::core::data::{hash_subtitles, is_video_file, SubtitleTrack, SyncTool, VideoSource};
 use subbub::core::data::{list_subtitles_files, list_video_files, TMP_DIRECTORY};
 use subbub::core::data::{ShiftDirection, SubtitleSource};
 use subbub::core::log::initialize_logging;
@@ -185,6 +185,7 @@ enum SubtitlesCommand {
         suffix: Option<String>,
     },
     /// adds given subtitle(s) (-s/--subtitles) to the given video(s) (-v/--video_path)
+    /// matches subtitles to videos on a 1:1 basis
     #[clap(verbatim_doc_comment)]
     AddSubtitles {
         #[command(flatten)]
@@ -195,7 +196,18 @@ enum SubtitlesCommand {
         video_path: VideoArgs,
         /// the language code that will be assigned to the newly added subtitle track
         #[arg(short = 'c', long)]
-        language_code: String,
+        language_code: Option<String>,
+    },
+    /// adds given subtitle(s) (-s/--subtitles) to the given video (-v/--video_path)
+    /// all given subtitles are added to the given video
+    #[clap(verbatim_doc_comment)]
+    AddBulkSubtitles {
+        #[command(flatten)]
+        input: SubtitleArgs,
+        #[command(flatten)]
+        output: OutputArgs,
+        #[command(flatten)]
+        video_path: VideoArgs,
     },
     /// extracts subtitle track from the given video file(s)
     #[clap(verbatim_doc_comment)]
@@ -310,6 +322,11 @@ fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
             video_path,
             language_code,
         } => add_subtitles(input, output, video_path, language_code)?,
+        SubtitlesCommand::AddBulkSubtitles {
+            input,
+            output,
+            video_path,
+        } => add_bulk_subtitles(input, output, video_path)?,
         SubtitlesCommand::ExtractSubtitles {
             output,
             video_track,
@@ -528,11 +545,11 @@ fn sync_subs(
 fn add_subtitles(
     input: &SubtitleArgs,
     output: &OutputArgs,
-    video_path: &VideoArgs,
-    language_code: &str,
+    video_args: &VideoArgs,
+    language_code: &Option<String>,
 ) -> Result<()> {
     let mut subtitles = input.parse()?.to_subtitles()?;
-    let mut videos = video_path.parse()?.to_videos()?;
+    let mut videos = video_args.parse()?.to_videos()?;
     if subtitles.len() != videos.len() {
         return Err(anyhow!(
             "subtitles and video inputs have different lengths, cannot match them to combine:\n    subtitles: {0}\n    videos: {1}",
@@ -547,7 +564,7 @@ fn add_subtitles(
     let units = zip(&subtitles, videos).collect_vec();
     for (subs, video_path) in units {
         // get subtitles path on disk
-        let subtitles_path = if is_video_file(&video_path) {
+        let subtitles_path = if is_video_file(&subs.path) {
             let tmp_filename = format!("add_{0}.srt", hash_subtitles(&subs.subtitles));
             let tmp_filepath = TMP_DIRECTORY.get().unwrap().join(tmp_filename);
             // if input path is a video file, we'll need to save the extracted subs and point to the extracted path
@@ -571,18 +588,74 @@ fn add_subtitles(
             // if there are multiple inputs, we'll use the given output as a directory, and name the output videos the same as their input counterpart
             fs::create_dir_all(output.output.clone())?;
             let filename = video_path
-                .file_name()
+                .file_stem()
                 .context("video file has no file name")?;
             output.output.join(filename)
         };
-        mkvmerge::add_subtitles_track(
+        mkvmerge::add_subtitles_tracks(
             &video_path,
-            &subtitles_path,
-            Some(language_code),
-            language_code,
+            vec![SubtitleTrack {
+                path: subtitles_path,
+                language_code: language_code.clone(),
+                title: None,
+            }],
             &output_path,
         )?;
     }
+
+    Ok(())
+}
+
+fn add_bulk_subtitles(
+    input: &SubtitleArgs,
+    output: &OutputArgs,
+    video_args: &VideoArgs,
+) -> Result<()> {
+    let mut subtitles = input.parse()?.to_subtitles()?;
+    let videos = video_args.parse()?.to_videos()?;
+    if videos.len() > 1 {
+        return Err(anyhow!(
+            "more than one video file was given; if you're trying to add subtitles to multiple videos use add-subtitles"
+        ));
+    }
+    subtitles.sort();
+    // start with the original video path (will be overwritten later)
+    let video_path = videos.first().expect("no video file given").to_owned();
+
+    let tracks: Vec<SubtitleTrack> = subtitles
+        .iter()
+        .map(|sub| {
+            // get subtitles path on disk
+            let subtitles_path = if is_video_file(&sub.path) {
+                let tmp_filename = format!("add_{0}.srt", hash_subtitles(&sub.subtitles));
+                let tmp_filepath = TMP_DIRECTORY.get().unwrap().join(tmp_filename);
+                // if input path is a video file, we'll need to save the extracted subs and point to the extracted path
+                sub.subtitles
+                    .write_to_file(&tmp_filepath, None)
+                    .expect(format!("could not write subs to file {tmp_filepath:?}").as_str());
+                tmp_filepath
+            } else {
+                // if input path is not a video file, we can assume it's a subtitles file and point to the path
+                sub.path.clone()
+            };
+            SubtitleTrack {
+                path: subtitles_path,
+                language_code: None,
+                title: None,
+            }
+        })
+        .collect();
+
+    // create parent directories
+    fs::create_dir_all(
+        output
+            .output
+            .parent()
+            .context("output path has no parent")?,
+    )?;
+
+    let output_path = output.output.to_path_buf();
+    mkvmerge::add_subtitles_tracks(&video_path, tracks, &output_path)?;
 
     Ok(())
 }
@@ -758,9 +831,11 @@ fn dual_subs_command_single(
     log::info!("#{index}: adding single subs track...");
     mkvmerge::add_subtitles_track(
         &mkv_filepath,
-        &single_sub_filepath,
-        Some(language_code),
-        language_code,
+        SubtitleTrack {
+            path: single_sub_filepath,
+            language_code: Some(language_code.to_owned()),
+            title: Some(language_code.to_owned()),
+        },
         &intermediate_video,
     )?;
     // add dual sub track
@@ -769,9 +844,11 @@ fn dual_subs_command_single(
     std::fs::create_dir_all(output)?;
     mkvmerge::add_subtitles_track(
         &intermediate_video,
-        &dual_sub_filepath,
-        None,
-        format!("dual-{language_code}").as_str(),
+        SubtitleTrack {
+            path: dual_sub_filepath,
+            language_code: None,
+            title: Some(format!("dual-{language_code}")),
+        },
         &final_video,
     )?;
     log::info!("finished processing video #{index}");

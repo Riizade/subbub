@@ -14,6 +14,12 @@ pub static TMP_DIRECTORY: Lazy<OnceCell<PathBuf>> = Lazy::new(|| OnceCell::from(
 pub const VIDEO_FILE_EXTENSIONS: [&str; 3] = ["mkv", "mp4", "avi"];
 pub const SUBTITLES_FILE_EXTENSIONS: [&str; 3] = ["ass", "ssa", "srt"];
 
+pub struct SubtitleTrack {
+    pub path: PathBuf,
+    pub language_code: Option<String>,
+    pub title: Option<String>,
+}
+
 fn tmp_directory() -> PathBuf {
     let dir = PathBuf::from("tmp/");
 

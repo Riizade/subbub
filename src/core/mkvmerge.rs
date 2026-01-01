@@ -2,28 +2,53 @@ use anyhow::{anyhow, Result};
 
 use std::{path::Path, process::Command};
 
-use crate::core::data::{pretty_cmd, pretty_output};
+use crate::core::data::{pretty_cmd, pretty_output, SubtitleTrack};
 
 pub fn add_subtitles_track(
     video_file: &Path,
-    subtitles_file: &Path,
-    language_code: Option<&str>,
-    track_name: &str,
+    subtitles_file: SubtitleTrack,
+    output_path: &Path,
+) -> Result<()> {
+    add_subtitles_tracks(video_file, vec![subtitles_file], output_path)
+}
+
+pub fn add_subtitles_tracks(
+    video_file: &Path,
+    subtitles_files: Vec<SubtitleTrack>,
     output_path: &Path,
 ) -> Result<()> {
     let mut command = Command::new("mkvmerge");
-    if let Some(code) = language_code {
+
+    for subs in subtitles_files {
+        // determine the track name for the subtitles
+        let actual_track_name = match &subs.title {
+            Some(t) => t.clone(),
+            None => subs
+                .path
+                .file_stem()
+                .expect("subtitles file had no file name")
+                .to_str()
+                .expect("could not convert OsStr to str")
+                .to_owned(),
+        };
+        // provide track naming arguments + subtitle filepath
         command
-            .arg("--language") // add the language code
-            .arg(format!("0:{code}"));
+            .arg("--track-name") // name the track
+            .arg(format!("0:{actual_track_name}"))
+            .arg(subs.path.as_os_str()); // input the subtitles file
+
+        // provide language code arguments if present
+        if let Some(code) = &subs.language_code {
+            command
+                .arg("--language") // add the language code
+                .arg(format!("0:{code}"));
+        }
     }
+
     command
         .arg("-o") // specify the output path
         .arg(output_path)
         .arg(video_file)// input the video file
-        .arg("--track-name") // name the track
-        .arg(format!("0:{track_name}"))
-        .arg(subtitles_file)// input the subtitles file
         ;
 
     log::debug!("{0}", pretty_cmd(&command));

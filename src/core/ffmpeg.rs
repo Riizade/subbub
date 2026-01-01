@@ -51,10 +51,19 @@ pub fn add_subtitles_track(
     video_file: &Path,
     subtitles_file: &Path,
     track_number: u32,
-    language_code: &str,
+    language_code: Option<&str>,
+    title: Option<&str>,
     output_path: &Path,
 ) -> Result<()> {
     let mut command = Command::new("ffmpeg");
+    let actual_title = match title {
+        Some(t) => t,
+        None => subtitles_file
+            .file_stem()
+            .expect("subtitles file had no file name")
+            .to_str()
+            .expect("could not convert OsStr to str"),
+    };
     command
         .arg("-i") // input the video file
         .arg(video_file)
@@ -69,11 +78,21 @@ pub fn add_subtitles_track(
         .arg("-c:s") // set subtitle format
         .arg("srt")
         .arg("-max_interleave_delta") // workaround for a known issue with mkv + subtitles with large gaps, see https://old.reddit.com/r/ffmpeg/comments/1do9azh/difficulty_adding_subtitles_track_to_video/la8bnh8/
-        .arg("0")
+        .arg("0")       
         .arg(format!("-metadata:s:s:{track_number}")) // set the track number (and also specify that they're subtitles)
-        .arg(format!("language={language_code}")) // add the language code
-        .arg(output_path) // finally, the output path of the newly created video file
+        .arg(format!("title={actual_title}")) // add the title
         ;
+    // if we were given a language code, specify it
+    match language_code {
+        Some(c) => {
+            command
+                .arg(format!("-metadata:s:s:{track_number}")) // set the track number (and also specify that they're subtitles)
+                .arg(format!("language={c}"));
+        } // add the language code
+        None => (),
+    };
+
+    command.arg(output_path); // finally, specify the output path of the newly created video file
 
     log::debug!("{0}", pretty_cmd(&command));
     let output = command.output()?;
