@@ -588,7 +588,7 @@ fn add_subtitles(
             // if there are multiple inputs, we'll use the given output as a directory, and name the output videos the same as their input counterpart
             fs::create_dir_all(output.output.clone())?;
             let filename = video_path
-                .file_stem()
+                .file_name()
                 .context("video file has no file name")?;
             output.output.join(filename)
         };
