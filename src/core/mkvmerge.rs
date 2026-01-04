@@ -4,6 +4,15 @@ use std::{path::Path, process::Command};
 
 use crate::core::data::{pretty_cmd, pretty_output, SubtitleTrack};
 
+fn confirm_mkvmerge() -> Result<()> {
+    let mut command = Command::new("mkvmerge");
+    command.arg("--version");
+    command
+        .output()
+        .expect("mkvmerge is not present; install mkvtoolnix to fix");
+    Ok(())
+}
+
 pub fn add_subtitles_track(
     video_file: &Path,
     subtitles_file: SubtitleTrack,
@@ -17,6 +26,7 @@ pub fn add_subtitles_tracks(
     subtitles_files: Vec<SubtitleTrack>,
     output_path: &Path,
 ) -> Result<()> {
+    confirm_mkvmerge()?;
     let mut command = Command::new("mkvmerge");
 
     for subs in subtitles_files {

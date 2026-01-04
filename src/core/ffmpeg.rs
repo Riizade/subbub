@@ -12,7 +12,17 @@ use crate::core::data::{pretty_cmd, pretty_output, TMP_DIRECTORY};
 
 use super::data::hash_string;
 
+fn confirm_ffmpeg() -> Result<()> {
+    let mut command = Command::new("ffmpeg");
+    command.arg("--version");
+    command
+        .output()
+        .expect("ffmpeg is not present; install ffmpeg to fix");
+    Ok(())
+}
+
 pub fn extract_subtitles(video_file: &Path, subtitle_track: u32) -> Result<Subtitles> {
+    confirm_ffmpeg()?;
     let tmp_file = TMP_DIRECTORY.get().unwrap().join(format!(
         "ext_{0}_{1}.srt",
         hash_string(&video_file.file_stem().unwrap().to_string_lossy()),
@@ -55,6 +65,7 @@ pub fn add_subtitles_track(
     title: Option<&str>,
     output_path: &Path,
 ) -> Result<()> {
+    confirm_ffmpeg()?;
     let mut command = Command::new("ffmpeg");
     let actual_title = match title {
         Some(t) => t,
@@ -110,6 +121,7 @@ pub fn add_subtitles_track(
 }
 
 pub fn read_subtitles_file(path: &Path) -> Result<Subtitles> {
+    confirm_ffmpeg()?;
     let tmp_file = TMP_DIRECTORY.get().unwrap().join(format!(
         "con_{0}.srt",
         hash_string(&path.file_stem().unwrap().to_string_lossy())
@@ -143,6 +155,7 @@ pub fn read_subtitles_file(path: &Path) -> Result<Subtitles> {
 }
 
 pub fn number_of_subtitle_streams(video_file: &Path) -> Result<u32> {
+    confirm_ffmpeg()?;
     let mut command = Command::new("ffprobe");
     command
         .arg("-v")
@@ -171,6 +184,7 @@ pub fn number_of_subtitle_streams(video_file: &Path) -> Result<u32> {
 }
 
 pub fn convert_to_mkv(video_file: &Path) -> Result<PathBuf> {
+    confirm_ffmpeg()?;
     let mut command = Command::new("ffmpeg");
     let output_file = TMP_DIRECTORY.get().unwrap().join(PathBuf::from_str(
         format!("{0}.mkv", video_file.file_stem().unwrap().to_string_lossy()).as_str(),

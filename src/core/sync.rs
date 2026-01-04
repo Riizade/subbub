@@ -6,6 +6,15 @@ use crate::core::data::{pretty_cmd, pretty_output};
 
 use super::data::{hash_subtitles, SyncTool, TMP_DIRECTORY};
 
+fn confirm_ffsubsync() -> Result<()> {
+    let mut command = Command::new("ffsubsync");
+    command.arg("--version");
+    command
+        .output()
+        .expect("ffsubsync is not present; install ffsubsync to fix");
+    Ok(())
+}
+
 pub fn sync(reference: &Subtitles, unsynced: &Subtitles, method: &SyncTool) -> Result<Subtitles> {
     match method {
         SyncTool::FFSUBSYNC => sync_ffsubsync(reference, unsynced),
@@ -13,6 +22,7 @@ pub fn sync(reference: &Subtitles, unsynced: &Subtitles, method: &SyncTool) -> R
 }
 
 fn sync_ffsubsync(reference: &Subtitles, unsynced: &Subtitles) -> Result<Subtitles> {
+    confirm_ffsubsync()?;
     let reference_hash = hash_subtitles(reference);
     let reference_file = TMP_DIRECTORY
         .get()
