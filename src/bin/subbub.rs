@@ -197,6 +197,9 @@ enum SubtitlesCommand {
         /// the language code that will be assigned to the newly added subtitle track
         #[arg(short = 'c', long)]
         language_code: Option<String>,
+        /// the title that will be applied to the newly added subtitle track
+        #[arg(short = 't', long)]
+        title: Option<String>,
     },
     /// adds given subtitle(s) (-s/--subtitles) to the given video (-v/--video_path)
     /// all given subtitles are added to the given video
@@ -321,7 +324,8 @@ fn subtitles_command(_: &Commands, subcommand: &Subtitles) -> Result<()> {
             output,
             video_path,
             language_code,
-        } => add_subtitles(input, output, video_path, language_code)?,
+            title,
+        } => add_subtitles(input, output, video_path, language_code, title)?,
         SubtitlesCommand::AddBulkSubtitles {
             input,
             output,
@@ -547,6 +551,7 @@ fn add_subtitles(
     output: &OutputArgs,
     video_args: &VideoArgs,
     language_code: &Option<String>,
+    title: &Option<String>,
 ) -> Result<()> {
     let mut subtitles = input.parse()?.to_subtitles()?;
     let mut videos = video_args.parse()?.to_videos()?;
@@ -597,7 +602,7 @@ fn add_subtitles(
             vec![SubtitleTrack {
                 path: subtitles_path,
                 language_code: language_code.clone(),
-                title: None,
+                title: title.clone(),
             }],
             &output_path,
         )?;
