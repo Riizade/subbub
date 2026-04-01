@@ -145,6 +145,27 @@ pub enum SubtitleSource {
     Directory(PathBuf),
 }
 
+impl TryFrom<&Path> for SubtitleSource {
+    type Error = anyhow::Error;
+    fn try_from(path: &Path) -> Result<Self> {
+        if path.is_dir() {
+            Ok(SubtitleSource::Directory(path.to_path_buf()))
+        } else if path.is_file() && is_subtitle_file(&path) {
+            Ok(SubtitleSource::File(path.to_path_buf()))
+        } else if path.is_file() && is_video_file(&path) {
+            Ok(SubtitleSource::VideoTrack {
+                path: path.to_path_buf(),
+                subtitle_track: 0,
+            })
+        } else {
+            Err(anyhow::Error::msg(format!(
+                "Invalid subtitle source: {}",
+                path.to_string_lossy()
+            )))
+        }
+    }
+}
+
 impl TryFrom<&str> for SubtitleSource {
     type Error = anyhow::Error;
     fn try_from(s: &str) -> Result<Self> {
@@ -164,24 +185,7 @@ impl TryFrom<&str> for SubtitleSource {
         // otherwise, we assume it's a file path
         else {
             let pathbuf = PathBuf::from(s);
-            if !pathbuf.exists() {
-                return Err(anyhow::Error::msg(format!(
-                    "File or directory does not exist: {}",
-                    pathbuf.to_string_lossy()
-                )));
-            } else if pathbuf.exists() && pathbuf.is_file() && is_subtitle_file(&pathbuf) {
-                // if the file exists and is a subtitle file, we return it as a file source
-                return Ok(SubtitleSource::File(pathbuf));
-            } else if pathbuf.is_dir() {
-                return Ok(SubtitleSource::Directory(pathbuf));
-            } else if pathbuf.is_file() {
-                return Ok(SubtitleSource::File(pathbuf));
-            } else {
-                return Err(anyhow::Error::msg(format!(
-                    "Invalid subtitle source: {}; unknown error occurred",
-                    pathbuf.to_string_lossy()
-                )));
-            }
+            SubtitleSource::try_from(pathbuf.as_path())
         }
     }
 }

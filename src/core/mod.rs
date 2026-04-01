@@ -5,3 +5,4 @@ pub mod merge;
 pub mod mkvmerge;
 pub mod modify;
 pub mod sync;
+pub mod utils;

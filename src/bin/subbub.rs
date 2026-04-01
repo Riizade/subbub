@@ -11,13 +11,16 @@ use std::process::exit;
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgGroup, Args, Parser, Subcommand};
 use log::LevelFilter;
-use subbub::core::data::{hash_subtitles, is_video_file, SubtitleTrack, SyncTool, VideoSource};
+use subbub::core::data::{
+    hash_subtitles, is_subtitle_file, is_video_file, SubtitleTrack, SyncTool, VideoSource,
+};
 use subbub::core::data::{list_subtitles_files, list_video_files, TMP_DIRECTORY};
 use subbub::core::data::{ShiftDirection, SubtitleSource};
 use subbub::core::log::initialize_logging;
 use subbub::core::merge::merge;
 use subbub::core::modify::{self, clean_subtitles};
 use subbub::core::sync::sync;
+use subbub::core::utils::read_input;
 use subbub::core::{ffmpeg, mkvmerge};
 
 #[derive(Parser)]
@@ -470,16 +473,22 @@ fn match_videos(
     video_path: &VideoArgs,
     suffix: Option<&str>,
 ) -> Result<()> {
-    let mut input_subs = input.parse()?.to_subtitles()?;
+    // get all subtitle files contained in input subtitles path
+    let mut input_subs: Vec<PathBuf> =
+        read_input(PathBuf::from(input.subtitles_path.clone()).as_path())?
+            .into_iter()
+            .filter(|path| is_subtitle_file(path))
+            .collect();
 
-    let parent_dir = input_subs
-        .first()
-        .expect("input subtitles does not contain any subtitles files")
-        .path
-        .file_stem()
-        .expect("input subtitles has no file stem")
-        .to_string_lossy();
-    let default_extension = format!(".{0}", parent_dir);
+    let default_extension = format!(
+        ".{0}",
+        input_subs
+            .first()
+            .expect("no input subs found")
+            .extension()
+            .expect("input subs have no extension")
+            .to_string_lossy()
+    );
     let suffix_str = suffix.unwrap_or_else(|| &default_extension);
     let mut videos = video_path.parse()?.to_videos()?;
 
@@ -487,7 +496,7 @@ fn match_videos(
         return Err(anyhow!("number of subtitles and number of videos are not the same:\n    videos: {0}\n    subtitles: {1}", videos.len(), input_subs.len()));
     }
 
-    input_subs.sort();
+    input_subs.sort_by(|a, b| a.file_stem().unwrap().cmp(b.file_stem().unwrap()));
     videos.sort();
 
     let result: Result<()> = zip(input_subs, videos)
@@ -499,7 +508,7 @@ fn match_videos(
                 output.output.join(video_name).to_string_lossy(),
                 suffix_str
             ));
-            std::fs::copy(subtitle.path, output_filename)?;
+            std::fs::copy(subtitle, output_filename)?;
             Ok(())
         })
         .collect();
@@ -553,7 +562,11 @@ fn add_subtitles(
     language_code: &Option<String>,
     title: &Option<String>,
 ) -> Result<()> {
-    let mut subtitles = input.parse()?.to_subtitles()?;
+    let mut subtitles: Vec<PathBuf> =
+        read_input(PathBuf::from(input.subtitles_path.clone()).as_path())?
+            .into_iter()
+            .filter(|path| is_subtitle_file(path))
+            .collect();
     let mut videos = video_args.parse()?.to_videos()?;
     if subtitles.len() != videos.len() {
         return Err(anyhow!(
@@ -569,15 +582,21 @@ fn add_subtitles(
     let units = zip(&subtitles, videos).collect_vec();
     for (subs, video_path) in units {
         // get subtitles path on disk
-        let subtitles_path = if is_video_file(&subs.path) {
-            let tmp_filename = format!("add_{0}.srt", hash_subtitles(&subs.subtitles));
+        let subtitles_path = if is_video_file(subs.as_path()) {
+            let subtitles = SubtitleSource::try_from(subs.as_path())?
+                .to_subtitles()?
+                .first()
+                .expect("video subtitle track has no subtitles")
+                .subtitles
+                .clone();
+            let tmp_filename = format!("add_{0}.srt", hash_subtitles(&subtitles));
             let tmp_filepath = TMP_DIRECTORY.get().unwrap().join(tmp_filename);
             // if input path is a video file, we'll need to save the extracted subs and point to the extracted path
-            subs.subtitles.write_to_file(&tmp_filepath, None)?;
+            subtitles.write_to_file(&tmp_filepath, None)?;
             tmp_filepath
         } else {
             // if input path is not a video file, we can assume it's a subtitles file and point to the path
-            subs.path.clone()
+            subs.clone()
         };
 
         let output_path = if subtitles.len() == 1 {
